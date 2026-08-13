@@ -28,14 +28,6 @@ fields:
   - name: last_login_at
     type: datetime
     nullable: true
-  - name: role
-    type: enum
-    nullable: false
-    default: "user"
-    client_writable: false
-    constraints:
-      values: ["admin", "user"]
-
 constraints:
   unique_together:
     - [provider, provider_user_id]
@@ -46,4 +38,4 @@ auth:
     create: public
     read: authenticated
     update: owner
-    delete: role:admin
+    delete: owner
