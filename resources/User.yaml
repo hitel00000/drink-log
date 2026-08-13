@@ -27,6 +27,7 @@ fields:
     type: enum
     nullable: false
     default: "user"
+    client_writable: false
     constraints:
       values: ["admin", "user"]
 
