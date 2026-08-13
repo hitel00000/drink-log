@@ -36,7 +36,6 @@ CREATE TABLE IF NOT EXISTS "users_new" (
     "email" TEXT,
     "display_name" TEXT,
     "avatar_url" TEXT,
-    "role" TEXT NOT NULL DEFAULT 'user' CHECK ("role" IN ('admin', 'user')),
     "last_login_at" TEXT,
     "created_at" TEXT NOT NULL,
     "updated_at" TEXT NOT NULL,
@@ -44,10 +43,10 @@ CREATE TABLE IF NOT EXISTS "users_new" (
 );
 
 INSERT INTO "users_new" (
-    "legacy_id", "provider", "provider_user_id", "email", "display_name", "avatar_url", "role", "last_login_at", "created_at", "updated_at"
+    "legacy_id", "provider", "provider_user_id", "email", "display_name", "avatar_url", "last_login_at", "created_at", "updated_at"
 )
 SELECT 
-    "id", "provider", "provider_user_id", "email", "display_name", "avatar_url", 'user', "last_login_at", "created_at", COALESCE("last_login_at", "created_at")
+    "id", "provider", "provider_user_id", "email", "display_name", "avatar_url", "last_login_at", "created_at", COALESCE("last_login_at", "created_at")
 FROM "users"
 ORDER BY "created_at" ASC;
 
