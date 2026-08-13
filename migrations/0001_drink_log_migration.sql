@@ -186,18 +186,19 @@ CREATE INDEX IF NOT EXISTS "idx_tags_owner_id" ON "tags_new"("owner_id");
 CREATE TABLE IF NOT EXISTS "record_tags_new" (
     "id" INTEGER PRIMARY KEY AUTOINCREMENT,
     "sake_record_id" INTEGER NOT NULL,
-    "tag_id" TEXT NOT NULL,
+    "tag_id" INTEGER NOT NULL,
     "created_at" TEXT NOT NULL,
     "updated_at" TEXT NOT NULL,
     FOREIGN KEY ("sake_record_id") REFERENCES "sake_records_new"("id") ON DELETE CASCADE,
-    FOREIGN KEY ("tag_id") REFERENCES "tags_new"("legacy_id") ON DELETE CASCADE
+    FOREIGN KEY ("tag_id") REFERENCES "tags_new"("id") ON DELETE CASCADE
 );
 
 INSERT INTO "record_tags_new" ("sake_record_id", "tag_id", "created_at", "updated_at")
 SELECT 
-    s."new_id", rt."tag_id", rt."created_at", COALESCE(rt."created_at", CURRENT_TIMESTAMP)
+    s."new_id", t."new_id", rt."created_at", COALESCE(rt."created_at", CURRENT_TIMESTAMP)
 FROM "record_tags" rt
 JOIN "_tmp_sake_map" s ON rt."record_id" = s."old_id"
+JOIN "_tmp_tag_map" t ON rt."tag_id" = t."old_id"
 ORDER BY rt."created_at" ASC;
 
 CREATE UNIQUE INDEX IF NOT EXISTS "idx_record_tags_sake_record_id_tag_id_unique" ON "record_tags_new"("sake_record_id", "tag_id");
