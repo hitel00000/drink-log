@@ -11,7 +11,7 @@ fields:
     constraints:
       unique: true
   - name: owner_id
-    type: string
+    type: int
     nullable: true
   - name: drink_type
     type: string
