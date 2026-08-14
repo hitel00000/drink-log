@@ -245,7 +245,7 @@ async function uploadImagePayload(env: AppEnv, image: SakeImage) {
   }
 }
 
-export function buildEntry(record: SakeRecord, images: ImageRow[], recordTags: SakeRecordTag[], tags: SakeTag[]) {
+function buildEntry(record: SakeRecord, images: ImageRow[], recordTags: SakeRecordTag[], tags: SakeTag[]) {
   const tagsById = new Map(tags.map((tag) => [tag.id, tag]));
   return {
     id: record.id,
@@ -266,26 +266,21 @@ export function buildEntry(record: SakeRecord, images: ImageRow[], recordTags: S
 }
 
 async function loadTagsForOwner(env: AppEnv, ownerId: string) {
-  const db = getDatabase(env);
-  const userRow = await db.prepare("SELECT id FROM users WHERE legacy_id = ? OR id = ?").bind(ownerId, ownerId).first<{ id: number }>();
-  const ownerIdVal = userRow ? userRow.id : ownerId;
-  const tags = await db
+  const tags = await getDatabase(env)
     .prepare(
-      `SELECT id, legacy_id, owner_id, drink_type, tag_group, label, is_default, created_at
+      `SELECT id, owner_id, drink_type, tag_group, label, is_default, created_at
        FROM tags
        WHERE drink_type = 'sake' AND (owner_id IS NULL OR owner_id = ?)
        ORDER BY tag_group, is_default DESC, created_at, label`,
     )
-    .bind(ownerIdVal)
+    .bind(ownerId)
     .all<SakeTag>();
   return tags.results;
 }
 
-export async function loadEntries(env: AppEnv, ownerId: string, recordId?: string, query?: string) {
+async function loadEntries(env: AppEnv, ownerId: string, recordId?: string, query?: string) {
   const db = getDatabase(env);
-  const userRow = await db.prepare("SELECT id FROM users WHERE legacy_id = ? OR id = ?").bind(ownerId, ownerId).first<{ id: number }>();
-  const ownerIdVal = userRow ? userRow.id : ownerId;
-  const params: unknown[] = [ownerIdVal];
+  const params: unknown[] = [ownerId];
   const clauses = ["record.owner_id = ?", "record.drink_type = 'sake'"];
   if (recordId) {
     clauses.push("record.id = ?");
@@ -297,7 +292,7 @@ export async function loadEntries(env: AppEnv, ownerId: string, recordId?: strin
       `(lower(record.name) LIKE ? OR lower(coalesce(record.region, '')) LIKE ? OR lower(coalesce(record.brewery, '')) LIKE ? OR lower(coalesce(record.sake_type, '')) LIKE ? OR lower(coalesce(record.rice, '')) LIKE ? OR lower(coalesce(record.place, '')) LIKE ? OR lower(coalesce(record.one_line_note, '')) LIKE ? OR EXISTS (
         SELECT 1 FROM record_tags rt
         JOIN tags tag ON tag.id = rt.tag_id
-        WHERE rt.sake_record_id = record.id AND lower(tag.label) LIKE ?
+        WHERE rt.record_id = record.id AND lower(tag.label) LIKE ?
       ))`,
     );
     params.push(search, search, search, search, search, search, search, search);
@@ -320,85 +315,45 @@ export async function loadEntries(env: AppEnv, ownerId: string, recordId?: strin
 
   const images = await db
     .prepare(
-      `SELECT id, legacy_id, owner_id, record_id, image_key, thumbnail_key, mime_type, file_name, display_order, created_at
+      `SELECT id, owner_id, record_id, image_key, thumbnail_key, mime_type, file_name, display_order, created_at
        FROM sake_images
        WHERE owner_id = ? ${recordId ? "AND record_id = ?" : ""}
        ORDER BY display_order, created_at`,
     )
-    .bind(...(recordId ? [ownerIdVal, recordId] : [ownerIdVal]))
+    .bind(...(recordId ? [ownerId, recordId] : [ownerId]))
     .all<ImageRow>();
 
   const recordTags = await db
     .prepare(
-      `SELECT rt.sake_record_id AS sake_record_id, rt.sake_record_id AS record_id, rt.tag_id, rt.created_at
+      `SELECT rt.record_id, rt.tag_id, rt.created_at
        FROM record_tags rt
-       JOIN sake_records record ON record.id = rt.sake_record_id
+       JOIN sake_records record ON record.id = rt.record_id
        WHERE record.owner_id = ? ${recordId ? "AND record.id = ?" : ""}`,
     )
-    .bind(...(recordId ? [ownerIdVal, recordId] : [ownerIdVal]))
+    .bind(...(recordId ? [ownerId, recordId] : [ownerId]))
     .all<SakeRecordTag>();
 
   const tags = await loadTagsForOwner(env, ownerId);
-
-  const sakeMap = new Map<number, string>(records.results.map((r: any) => [r.id, r.legacy_id || String(r.id)]));
-  const tagMap = new Map<number, string>(tags.map((t: any) => [t.id, t.legacy_id || String(t.id)]));
-
-  const remappedRecords = records.results.map((r: any) => {
-    const copy = { ...r, id: r.legacy_id || String(r.id), owner_id: ownerId };
-    delete copy.legacy_id;
-    return copy;
-  });
-
-  const remappedImages = images.results.map((i: any) => {
-    const copy = {
-      ...i,
-      id: i.legacy_id || String(i.id),
-      owner_id: ownerId,
-      record_id: sakeMap.get(i.record_id) || String(i.record_id),
-    };
-    delete copy.legacy_id;
-    return copy;
-  });
-
-  const remappedTags = tags.map((t: any) => {
-    const copy = {
-      ...t,
-      id: t.legacy_id || String(t.id),
-      owner_id: t.owner_id ? ownerId : null,
-    };
-    delete copy.legacy_id;
-    return copy;
-  });
-
-  const remappedRecordTags = recordTags.results.map((rt: any) => ({
-    sake_record_id: sakeMap.get(rt.sake_record_id || rt.record_id) || String(rt.sake_record_id || rt.record_id),
-    record_id: sakeMap.get(rt.sake_record_id || rt.record_id) || String(rt.sake_record_id || rt.record_id),
-    tag_id: tagMap.get(rt.tag_id) || String(rt.tag_id),
-    created_at: rt.created_at,
-  }));
-
   const imagesByRecordId = new Map<string, ImageRow[]>();
-  remappedImages.forEach((image: any) => {
+  images.results.forEach((image) => {
     const group = imagesByRecordId.get(image.record_id) ?? [];
     group.push(image);
     imagesByRecordId.set(image.record_id, group);
   });
 
   const tagsByRecordId = new Map<string, SakeRecordTag[]>();
-  remappedRecordTags.forEach((recordTag: any) => {
-    const recordKey = recordTag.record_id || recordTag.sake_record_id;
-    if (!recordKey) return;
-    const group = tagsByRecordId.get(String(recordKey)) ?? [];
+  recordTags.results.forEach((recordTag) => {
+    const group = tagsByRecordId.get(recordTag.record_id) ?? [];
     group.push(recordTag);
-    tagsByRecordId.set(String(recordKey), group);
+    tagsByRecordId.set(recordTag.record_id, group);
   });
 
-  return remappedRecords.map((record: any) =>
+  return records.results.map((record) =>
     buildEntry(
       record,
-      imagesByRecordId.get(String(record.id)) ?? [],
-      tagsByRecordId.get(String(record.id)) ?? [],
-      remappedTags,
+      imagesByRecordId.get(record.id) ?? [],
+      tagsByRecordId.get(record.id) ?? [],
+      tags,
     ),
   );
 }
