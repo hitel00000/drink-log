@@ -105,6 +105,10 @@ async function getAuthUser(c: any): Promise<AuthUser | null> {
 app.get('/', (c) => c.text('Mold Cloudflare Workers Target API'));
 
 const relMetadata: Record<string, Record<string, { kind: string; targetTable: string; fk: string; permRead: string; ownershipField: string; softDelete: boolean; pwdFields: string[] }>> = {
+  'record_tags': {
+    'sake_record': { kind: 'belongs_to', targetTable: 'sake_records', fk: 'sake_record_id', permRead: 'owner', ownershipField: 'owner_id', softDelete: false, pwdFields: [] },
+    'tag': { kind: 'belongs_to', targetTable: 'tags', fk: 'tag_id', permRead: 'owner', ownershipField: 'owner_id', softDelete: false, pwdFields: [] },
+  },
   'sake_images': {
     'owner': { kind: 'belongs_to', targetTable: 'users', fk: 'owner_id', permRead: 'authenticated', ownershipField: 'id', softDelete: false, pwdFields: [] },
     'record': { kind: 'belongs_to', targetTable: 'sake_records', fk: 'record_id', permRead: 'owner', ownershipField: 'owner_id', softDelete: false, pwdFields: [] },
@@ -118,10 +122,6 @@ const relMetadata: Record<string, Record<string, { kind: string; targetTable: st
     'owner': { kind: 'belongs_to', targetTable: 'users', fk: 'owner_id', permRead: 'authenticated', ownershipField: 'id', softDelete: false, pwdFields: [] },
   },
   'users': {
-  },
-  'record_tags': {
-    'sake_record': { kind: 'belongs_to', targetTable: 'sake_records', fk: 'sake_record_id', permRead: 'owner', ownershipField: 'owner_id', softDelete: false, pwdFields: [] },
-    'tag': { kind: 'belongs_to', targetTable: 'tags', fk: 'tag_id', permRead: 'owner', ownershipField: 'owner_id', softDelete: false, pwdFields: [] },
   },
 };
 
@@ -197,6 +197,240 @@ async function processIncludes(c: any, currentTable: string, records: any[], inc
   return null;
 }
 
+
+// LIST /api/record_tags
+app.get('/api/record_tags', async (c) => {
+  const authUser = await getAuthUser(c);
+  if (!authUser) {
+    return writeError(c, 401, 'UNAUTHORIZED', 'authentication required');
+  }
+  if (authUser.role !== 'admin') {
+    return writeError(c, 403, 'FORBIDDEN', 'forbidden');
+  }
+  const limit = Math.min(parseInt(c.req.query('limit') || '20', 10), 100);
+  const offset = Math.max(parseInt(c.req.query('offset') || '0', 10), 0);
+
+  const whereConds: string[] = [];
+  const params: any[] = [];
+  const whereClause = whereConds.length > 0 ? ' WHERE ' + whereConds.join(' AND ') : '';
+  const countSql = `SELECT COUNT(*) as total FROM "record_tags"${whereClause}`;
+  const countStmt = await c.env.DB.prepare(countSql).bind(...params).first<{ total: number }>();
+  const total = countStmt ? countStmt.total : 0;
+  const querySql = `SELECT * FROM "record_tags"${whereClause} ORDER BY id ASC LIMIT ? OFFSET ?`;
+  const { results } = await c.env.DB.prepare(querySql).bind(...params, limit, offset).all();
+  const sanitized = (results || []).map((r: any) => sanitizeRecord(r, []));
+  const incErr = await processIncludes(c, 'record_tags', sanitized, c.req.query('include'), authUser);
+  if (incErr) return incErr;
+  return c.json({
+    data: sanitized,
+    meta: { total, limit, offset }
+  });
+});
+
+// DETAIL /api/record_tags/:id
+app.get('/api/record_tags/:id', async (c) => {
+  const authUser = await getAuthUser(c);
+  if (!authUser) {
+    return writeError(c, 401, 'UNAUTHORIZED', 'authentication required');
+  }
+  const id = c.req.param('id');
+  const record = await c.env.DB.prepare('SELECT * FROM "record_tags" WHERE id = ?').bind(id).first();
+  if (!record) {
+    return writeError(c, 404, 'NOT_FOUND', 'record not found');
+  }
+  if (!authUser || (authUser.role !== 'admin' && authUser.role !== 'admin')) {
+    return writeError(c, 403, 'FORBIDDEN', 'forbidden');
+  }
+  const sanitized = sanitizeRecord(record, []);
+  const incErr = await processIncludes(c, 'record_tags', [sanitized], c.req.query('include'), authUser);
+  if (incErr) return incErr;
+  return c.json({ data: sanitized });
+});
+
+// CREATE /api/record_tags
+app.post('/api/record_tags', async (c) => {
+  const authUser = await getAuthUser(c);
+  if (!authUser) {
+    return writeError(c, 401, 'UNAUTHORIZED', 'authentication required');
+  }
+  if (!authUser || authUser.role !== 'admin') {
+    return writeError(c, 403, 'FORBIDDEN', 'forbidden');
+  }
+  let body: any = {};
+  let formData: FormData | null = null;
+  const rawHeader = c.req.header('content-type') || c.req.header('Content-Type') || (c.req.raw && c.req.raw.headers ? c.req.raw.headers.get('content-type') : '') || '';
+  const contentType = String(rawHeader).toLowerCase();
+  if (contentType.includes('multipart/form-data')) {
+    try {
+      formData = await c.req.formData();
+      formData.forEach((val, key) => {
+        if (typeof val === 'string') { body[key] = (val !== '' && !isNaN(Number(val))) ? Number(val) : val; }
+      });
+    } catch (e) {
+      return writeError(c, 400, 'INVALID_MULTIPART', 'failed to parse multipart body');
+    }
+  } else {
+    try {
+      body = await c.req.json();
+    } catch (e) {
+      return writeError(c, 400, 'INVALID_JSON', 'failed to parse json body');
+    }
+  }
+
+  if (body['role'] === 'admin' && (!authUser || authUser.role !== 'admin')) {
+    return writeError(c, 403, 'FORBIDDEN', 'cannot grant admin role');
+  }
+  if (body['sake_record_id'] === undefined || body['sake_record_id'] === null) {
+    return writeError(c, 400, 'VALIDATION_FAILED', 'field sake_record_id is required');
+  }
+  if (body['sake_record_id'] !== undefined && body['sake_record_id'] !== null && typeof body['sake_record_id'] !== 'number') {
+    return writeError(c, 400, 'VALIDATION_FAILED', 'field sake_record_id must be a number');
+  }
+  if (body['tag_id'] === undefined || body['tag_id'] === null) {
+    return writeError(c, 400, 'VALIDATION_FAILED', 'field tag_id is required');
+  }
+  if (body['tag_id'] !== undefined && body['tag_id'] !== null && typeof body['tag_id'] !== 'number') {
+    return writeError(c, 400, 'VALIDATION_FAILED', 'field tag_id must be a number');
+  }
+
+  const now = new Date().toISOString();
+  const insertSql = `INSERT INTO "record_tags" ("sake_record_id", "tag_id", "created_at", "updated_at") VALUES (?, ?, ?, ?) RETURNING *`;
+  let created: any = null;
+  try {
+    created = await c.env.DB.prepare(insertSql).bind(body['sake_record_id'] !== undefined ? body['sake_record_id'] : null, body['tag_id'] !== undefined ? body['tag_id'] : null, now, now).first<any>();
+  } catch (err: any) {
+    const errMsg = String(err?.message || err);
+    if (errMsg.includes('UNIQUE constraint failed') || errMsg.includes('SQLITE_CONSTRAINT')) {
+      return writeError(c, 400, 'INVALID_INPUT', `unique constraint failed: ${errMsg}`);
+    }
+    return writeError(c, 400, 'INVALID_INPUT', errMsg);
+  }
+  return c.json({ data: sanitizeRecord(created, []) }, 201);
+});
+
+// UPDATE /api/record_tags/:id
+app.put('/api/record_tags/:id', async (c) => {
+  const authUser = await getAuthUser(c);
+  if (!authUser) {
+    return writeError(c, 401, 'UNAUTHORIZED', 'authentication required');
+  }
+  const id = c.req.param('id');
+  const existing = await c.env.DB.prepare('SELECT * FROM "record_tags" WHERE id = ?').bind(id).first();
+  if (!existing) {
+    return writeError(c, 404, 'NOT_FOUND', 'record not found');
+  }
+  if (!authUser || authUser.role !== 'admin') {
+    return writeError(c, 403, 'FORBIDDEN', 'forbidden');
+  }
+  let body: any;
+  try {
+    body = await c.req.json();
+  } catch (e) {
+    return writeError(c, 400, 'INVALID_JSON', 'failed to parse json body');
+  }
+
+  if (body['role'] !== undefined && body['role'] !== (existing as any)['role'] && body['role'] === 'admin' && (!authUser || authUser.role !== 'admin')) {
+    return writeError(c, 403, 'FORBIDDEN', 'cannot grant admin role');
+  }
+  const now = new Date().toISOString();
+  const updateSql = `UPDATE "record_tags" SET "sake_record_id" = ?, "tag_id" = ?, "updated_at" = ? WHERE id = ? RETURNING *`;
+  let updated: any = null;
+  try {
+    updated = await c.env.DB.prepare(updateSql).bind(body['sake_record_id'] !== undefined ? body['sake_record_id'] : (existing as any)['sake_record_id'], body['tag_id'] !== undefined ? body['tag_id'] : (existing as any)['tag_id'], now, id).first();
+  } catch (err: any) {
+    const errMsg = String(err?.message || err);
+    if (errMsg.includes('UNIQUE constraint failed') || errMsg.includes('SQLITE_CONSTRAINT')) {
+      return writeError(c, 400, 'INVALID_INPUT', `unique constraint failed: ${errMsg}`);
+    }
+    return writeError(c, 400, 'INVALID_INPUT', errMsg);
+  }
+  if (!updated) {
+    return writeError(c, 404, 'NOT_FOUND', 'record not found');
+  }
+  return c.json({ data: sanitizeRecord(updated, []) });
+});
+
+// DELETE /api/record_tags/:id
+app.delete('/api/record_tags/:id', async (c) => {
+  const authUser = await getAuthUser(c);
+  if (!authUser) {
+    return writeError(c, 401, 'UNAUTHORIZED', 'authentication required');
+  }
+  const id = c.req.param('id');
+  const parsedId = isNaN(Number(id)) ? id : Number(id);
+  const existing = await c.env.DB.prepare('SELECT * FROM "record_tags" WHERE id = ?').bind(id).first();
+  if (!existing) {
+    return writeError(c, 404, 'NOT_FOUND', 'record not found');
+  }
+  if (!authUser || authUser.role !== 'admin') {
+    return writeError(c, 403, 'FORBIDDEN', 'forbidden');
+  }
+  const res = await c.env.DB.prepare('DELETE FROM "record_tags" WHERE id = ?').bind(id).run();
+  if (!res.meta.changes) {
+    return writeError(c, 404, 'NOT_FOUND', 'record not found');
+  }
+  return c.json({ data: { deleted: true, id: parsedId } });
+});
+
+// VIEW LIST /view/record_tags
+app.get('/view/record_tags', async (c) => {
+  const authUser = await getAuthUser(c);
+  const whereConds: string[] = [];
+  const params: any[] = [];
+  const whereClause = whereConds.length > 0 ? ' WHERE ' + whereConds.join(' AND ') : '';
+  const { results } = await c.env.DB.prepare(`SELECT * FROM "record_tags"${whereClause} ORDER BY id ASC`).bind(...params).all();
+  const viewRecs = (results || []) as any[];
+  const incErr = await processIncludes(c, 'record_tags', viewRecs, c.req.query('include'), authUser);
+  if (incErr) return incErr;
+  let html = `<!DOCTYPE html><html><head><title>RecordTag List</title></head><body>`;
+  html += `<h1>RecordTag List</h1>`;
+  html += `<a href="/view/record_tags/new">+ New RecordTag</a><br/><br/><table border="1"><thead><tr><th>id</th>`;
+  html += `<th>sake_record_id</th>`;
+  html += `<th>tag_id</th>`;
+  html += `<th>Actions</th></tr></thead><tbody>`;
+  for (const row of viewRecs) {
+    html += `<tr><td>${(row as any).id}</td>`;
+    html += `<td>${escapeHTML((row as any)['sake_record_id'])}</td>`;
+    html += `<td>${escapeHTML((row as any)['tag_id'])}</td>`;
+    html += `<td><a href="/view/record_tags/${(row as any).id}">Detail</a> <a href="/view/record_tags/${(row as any).id}/edit">Edit</a></td></tr>`;
+  }
+  html += `</tbody></table></body></html>`;
+  return c.html(html);
+});
+
+// VIEW NEW /view/record_tags/new
+app.get('/view/record_tags/new', async (c) => {
+  let html = `<!DOCTYPE html><html><head><title>New RecordTag</title></head><body><h1>New RecordTag</h1><form method="POST" action="/view/record_tags">`;
+  html += `<label>sake_record_id: <input type="number" name="sake_record_id" /></label><br/><br/>`;
+  html += `<label>tag_id: <input type="number" name="tag_id" /></label><br/><br/>`;
+  html += `<button type="submit">Save</button></form></body></html>`;
+  return c.html(html);
+});
+
+// VIEW CREATE SUBMIT /view/record_tags
+app.post('/view/record_tags', async (c) => {
+  const formData = await c.req.formData();
+  const body: any = {};
+  formData.forEach((value, key) => { body[key] = value; });
+  const now = new Date().toISOString();
+  await c.env.DB.prepare(insertSql).bind(body['sake_record_id'] !== undefined ? body['sake_record_id'] : null, body['tag_id'] !== undefined ? body['tag_id'] : null, now, now).run();
+  return c.redirect('/view/record_tags', 303);
+});
+
+// VIEW DETAIL /view/record_tags/:id
+app.get('/view/record_tags/:id', async (c) => {
+  const id = c.req.param('id');
+  const record = await c.env.DB.prepare('SELECT * FROM "record_tags" WHERE id = ?').bind(id).first<any>();
+  if (!record) return c.html('<h1>404 Not Found</h1>', 404);
+  const authUser = await getAuthUser(c);
+  const incErr = await processIncludes(c, 'record_tags', [record], c.req.query('include'), authUser);
+  if (incErr) return incErr;
+  let html = `<!DOCTYPE html><html><head><title>RecordTag Detail</title></head><body><h1>RecordTag #${id}</h1><dl>`;
+  html += `<dt>sake_record_id</dt><dd>${escapeHTML(record['sake_record_id'])}</dd>`;
+  html += `<dt>tag_id</dt><dd>${escapeHTML(record['tag_id'])}</dd>`;
+  html += `</dl></body></html>`;
+  return c.html(html);
+});
 
 // LIST /api/sake_images
 app.get('/api/sake_images', async (c) => {
@@ -1687,240 +1921,6 @@ app.get('/view/users/:id', async (c) => {
   html += `<dt>display_name</dt><dd>${escapeHTML(record['display_name'])}</dd>`;
   html += `<dt>avatar_url</dt><dd>${escapeHTML(record['avatar_url'])}</dd>`;
   html += `<dt>last_login_at</dt><dd>${escapeHTML(record['last_login_at'])}</dd>`;
-  html += `</dl></body></html>`;
-  return c.html(html);
-});
-
-// LIST /api/record_tags
-app.get('/api/record_tags', async (c) => {
-  const authUser = await getAuthUser(c);
-  if (!authUser) {
-    return writeError(c, 401, 'UNAUTHORIZED', 'authentication required');
-  }
-  if (authUser.role !== 'admin') {
-    return writeError(c, 403, 'FORBIDDEN', 'forbidden');
-  }
-  const limit = Math.min(parseInt(c.req.query('limit') || '20', 10), 100);
-  const offset = Math.max(parseInt(c.req.query('offset') || '0', 10), 0);
-
-  const whereConds: string[] = [];
-  const params: any[] = [];
-  const whereClause = whereConds.length > 0 ? ' WHERE ' + whereConds.join(' AND ') : '';
-  const countSql = `SELECT COUNT(*) as total FROM "record_tags"${whereClause}`;
-  const countStmt = await c.env.DB.prepare(countSql).bind(...params).first<{ total: number }>();
-  const total = countStmt ? countStmt.total : 0;
-  const querySql = `SELECT * FROM "record_tags"${whereClause} ORDER BY id ASC LIMIT ? OFFSET ?`;
-  const { results } = await c.env.DB.prepare(querySql).bind(...params, limit, offset).all();
-  const sanitized = (results || []).map((r: any) => sanitizeRecord(r, []));
-  const incErr = await processIncludes(c, 'record_tags', sanitized, c.req.query('include'), authUser);
-  if (incErr) return incErr;
-  return c.json({
-    data: sanitized,
-    meta: { total, limit, offset }
-  });
-});
-
-// DETAIL /api/record_tags/:id
-app.get('/api/record_tags/:id', async (c) => {
-  const authUser = await getAuthUser(c);
-  if (!authUser) {
-    return writeError(c, 401, 'UNAUTHORIZED', 'authentication required');
-  }
-  const id = c.req.param('id');
-  const record = await c.env.DB.prepare('SELECT * FROM "record_tags" WHERE id = ?').bind(id).first();
-  if (!record) {
-    return writeError(c, 404, 'NOT_FOUND', 'record not found');
-  }
-  if (!authUser || (authUser.role !== 'admin' && authUser.role !== 'admin')) {
-    return writeError(c, 403, 'FORBIDDEN', 'forbidden');
-  }
-  const sanitized = sanitizeRecord(record, []);
-  const incErr = await processIncludes(c, 'record_tags', [sanitized], c.req.query('include'), authUser);
-  if (incErr) return incErr;
-  return c.json({ data: sanitized });
-});
-
-// CREATE /api/record_tags
-app.post('/api/record_tags', async (c) => {
-  const authUser = await getAuthUser(c);
-  if (!authUser) {
-    return writeError(c, 401, 'UNAUTHORIZED', 'authentication required');
-  }
-  if (!authUser || authUser.role !== 'admin') {
-    return writeError(c, 403, 'FORBIDDEN', 'forbidden');
-  }
-  let body: any = {};
-  let formData: FormData | null = null;
-  const rawHeader = c.req.header('content-type') || c.req.header('Content-Type') || (c.req.raw && c.req.raw.headers ? c.req.raw.headers.get('content-type') : '') || '';
-  const contentType = String(rawHeader).toLowerCase();
-  if (contentType.includes('multipart/form-data')) {
-    try {
-      formData = await c.req.formData();
-      formData.forEach((val, key) => {
-        if (typeof val === 'string') { body[key] = (val !== '' && !isNaN(Number(val))) ? Number(val) : val; }
-      });
-    } catch (e) {
-      return writeError(c, 400, 'INVALID_MULTIPART', 'failed to parse multipart body');
-    }
-  } else {
-    try {
-      body = await c.req.json();
-    } catch (e) {
-      return writeError(c, 400, 'INVALID_JSON', 'failed to parse json body');
-    }
-  }
-
-  if (body['role'] === 'admin' && (!authUser || authUser.role !== 'admin')) {
-    return writeError(c, 403, 'FORBIDDEN', 'cannot grant admin role');
-  }
-  if (body['sake_record_id'] === undefined || body['sake_record_id'] === null) {
-    return writeError(c, 400, 'VALIDATION_FAILED', 'field sake_record_id is required');
-  }
-  if (body['sake_record_id'] !== undefined && body['sake_record_id'] !== null && typeof body['sake_record_id'] !== 'number') {
-    return writeError(c, 400, 'VALIDATION_FAILED', 'field sake_record_id must be a number');
-  }
-  if (body['tag_id'] === undefined || body['tag_id'] === null) {
-    return writeError(c, 400, 'VALIDATION_FAILED', 'field tag_id is required');
-  }
-  if (body['tag_id'] !== undefined && body['tag_id'] !== null && typeof body['tag_id'] !== 'number') {
-    return writeError(c, 400, 'VALIDATION_FAILED', 'field tag_id must be a number');
-  }
-
-  const now = new Date().toISOString();
-  const insertSql = `INSERT INTO "record_tags" ("sake_record_id", "tag_id", "created_at", "updated_at") VALUES (?, ?, ?, ?) RETURNING *`;
-  let created: any = null;
-  try {
-    created = await c.env.DB.prepare(insertSql).bind(body['sake_record_id'] !== undefined ? body['sake_record_id'] : null, body['tag_id'] !== undefined ? body['tag_id'] : null, now, now).first<any>();
-  } catch (err: any) {
-    const errMsg = String(err?.message || err);
-    if (errMsg.includes('UNIQUE constraint failed') || errMsg.includes('SQLITE_CONSTRAINT')) {
-      return writeError(c, 400, 'INVALID_INPUT', `unique constraint failed: ${errMsg}`);
-    }
-    return writeError(c, 400, 'INVALID_INPUT', errMsg);
-  }
-  return c.json({ data: sanitizeRecord(created, []) }, 201);
-});
-
-// UPDATE /api/record_tags/:id
-app.put('/api/record_tags/:id', async (c) => {
-  const authUser = await getAuthUser(c);
-  if (!authUser) {
-    return writeError(c, 401, 'UNAUTHORIZED', 'authentication required');
-  }
-  const id = c.req.param('id');
-  const existing = await c.env.DB.prepare('SELECT * FROM "record_tags" WHERE id = ?').bind(id).first();
-  if (!existing) {
-    return writeError(c, 404, 'NOT_FOUND', 'record not found');
-  }
-  if (!authUser || authUser.role !== 'admin') {
-    return writeError(c, 403, 'FORBIDDEN', 'forbidden');
-  }
-  let body: any;
-  try {
-    body = await c.req.json();
-  } catch (e) {
-    return writeError(c, 400, 'INVALID_JSON', 'failed to parse json body');
-  }
-
-  if (body['role'] !== undefined && body['role'] !== (existing as any)['role'] && body['role'] === 'admin' && (!authUser || authUser.role !== 'admin')) {
-    return writeError(c, 403, 'FORBIDDEN', 'cannot grant admin role');
-  }
-  const now = new Date().toISOString();
-  const updateSql = `UPDATE "record_tags" SET "sake_record_id" = ?, "tag_id" = ?, "updated_at" = ? WHERE id = ? RETURNING *`;
-  let updated: any = null;
-  try {
-    updated = await c.env.DB.prepare(updateSql).bind(body['sake_record_id'] !== undefined ? body['sake_record_id'] : (existing as any)['sake_record_id'], body['tag_id'] !== undefined ? body['tag_id'] : (existing as any)['tag_id'], now, id).first();
-  } catch (err: any) {
-    const errMsg = String(err?.message || err);
-    if (errMsg.includes('UNIQUE constraint failed') || errMsg.includes('SQLITE_CONSTRAINT')) {
-      return writeError(c, 400, 'INVALID_INPUT', `unique constraint failed: ${errMsg}`);
-    }
-    return writeError(c, 400, 'INVALID_INPUT', errMsg);
-  }
-  if (!updated) {
-    return writeError(c, 404, 'NOT_FOUND', 'record not found');
-  }
-  return c.json({ data: sanitizeRecord(updated, []) });
-});
-
-// DELETE /api/record_tags/:id
-app.delete('/api/record_tags/:id', async (c) => {
-  const authUser = await getAuthUser(c);
-  if (!authUser) {
-    return writeError(c, 401, 'UNAUTHORIZED', 'authentication required');
-  }
-  const id = c.req.param('id');
-  const parsedId = isNaN(Number(id)) ? id : Number(id);
-  const existing = await c.env.DB.prepare('SELECT * FROM "record_tags" WHERE id = ?').bind(id).first();
-  if (!existing) {
-    return writeError(c, 404, 'NOT_FOUND', 'record not found');
-  }
-  if (!authUser || authUser.role !== 'admin') {
-    return writeError(c, 403, 'FORBIDDEN', 'forbidden');
-  }
-  const res = await c.env.DB.prepare('DELETE FROM "record_tags" WHERE id = ?').bind(id).run();
-  if (!res.meta.changes) {
-    return writeError(c, 404, 'NOT_FOUND', 'record not found');
-  }
-  return c.json({ data: { deleted: true, id: parsedId } });
-});
-
-// VIEW LIST /view/record_tags
-app.get('/view/record_tags', async (c) => {
-  const authUser = await getAuthUser(c);
-  const whereConds: string[] = [];
-  const params: any[] = [];
-  const whereClause = whereConds.length > 0 ? ' WHERE ' + whereConds.join(' AND ') : '';
-  const { results } = await c.env.DB.prepare(`SELECT * FROM "record_tags"${whereClause} ORDER BY id ASC`).bind(...params).all();
-  const viewRecs = (results || []) as any[];
-  const incErr = await processIncludes(c, 'record_tags', viewRecs, c.req.query('include'), authUser);
-  if (incErr) return incErr;
-  let html = `<!DOCTYPE html><html><head><title>RecordTag List</title></head><body>`;
-  html += `<h1>RecordTag List</h1>`;
-  html += `<a href="/view/record_tags/new">+ New RecordTag</a><br/><br/><table border="1"><thead><tr><th>id</th>`;
-  html += `<th>sake_record_id</th>`;
-  html += `<th>tag_id</th>`;
-  html += `<th>Actions</th></tr></thead><tbody>`;
-  for (const row of viewRecs) {
-    html += `<tr><td>${(row as any).id}</td>`;
-    html += `<td>${escapeHTML((row as any)['sake_record_id'])}</td>`;
-    html += `<td>${escapeHTML((row as any)['tag_id'])}</td>`;
-    html += `<td><a href="/view/record_tags/${(row as any).id}">Detail</a> <a href="/view/record_tags/${(row as any).id}/edit">Edit</a></td></tr>`;
-  }
-  html += `</tbody></table></body></html>`;
-  return c.html(html);
-});
-
-// VIEW NEW /view/record_tags/new
-app.get('/view/record_tags/new', async (c) => {
-  let html = `<!DOCTYPE html><html><head><title>New RecordTag</title></head><body><h1>New RecordTag</h1><form method="POST" action="/view/record_tags">`;
-  html += `<label>sake_record_id: <input type="number" name="sake_record_id" /></label><br/><br/>`;
-  html += `<label>tag_id: <input type="number" name="tag_id" /></label><br/><br/>`;
-  html += `<button type="submit">Save</button></form></body></html>`;
-  return c.html(html);
-});
-
-// VIEW CREATE SUBMIT /view/record_tags
-app.post('/view/record_tags', async (c) => {
-  const formData = await c.req.formData();
-  const body: any = {};
-  formData.forEach((value, key) => { body[key] = value; });
-  const now = new Date().toISOString();
-  await c.env.DB.prepare(insertSql).bind(body['sake_record_id'] !== undefined ? body['sake_record_id'] : null, body['tag_id'] !== undefined ? body['tag_id'] : null, now, now).run();
-  return c.redirect('/view/record_tags', 303);
-});
-
-// VIEW DETAIL /view/record_tags/:id
-app.get('/view/record_tags/:id', async (c) => {
-  const id = c.req.param('id');
-  const record = await c.env.DB.prepare('SELECT * FROM "record_tags" WHERE id = ?').bind(id).first<any>();
-  if (!record) return c.html('<h1>404 Not Found</h1>', 404);
-  const authUser = await getAuthUser(c);
-  const incErr = await processIncludes(c, 'record_tags', [record], c.req.query('include'), authUser);
-  if (incErr) return incErr;
-  let html = `<!DOCTYPE html><html><head><title>RecordTag Detail</title></head><body><h1>RecordTag #${id}</h1><dl>`;
-  html += `<dt>sake_record_id</dt><dd>${escapeHTML(record['sake_record_id'])}</dd>`;
-  html += `<dt>tag_id</dt><dd>${escapeHTML(record['tag_id'])}</dd>`;
   html += `</dl></body></html>`;
   return c.html(html);
 });

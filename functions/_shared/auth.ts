@@ -257,10 +257,26 @@ export async function readSession(request: Request, env: AppEnv) {
   }
 
   await ensureSessionTable(env);
-  const session = await getDatabase(env)
+  let session = await getDatabase(env)
     .prepare("SELECT user_id, expires_at FROM oauth_sessions WHERE id = ?")
     .bind(sessionId)
     .first<SessionRow>();
+
+  if (!session) {
+    const moldSession = await getDatabase(env)
+      .prepare("SELECT user_id, expires_at FROM _mold_sessions WHERE id = ?")
+      .bind(sessionId)
+      .first<{ user_id: number; expires_at: string }>();
+    if (moldSession) {
+      const user = await getDatabase(env)
+        .prepare("SELECT legacy_id FROM users WHERE id = ?")
+        .bind(moldSession.user_id)
+        .first<{ legacy_id: string }>();
+      if (user) {
+        session = { user_id: user.legacy_id, expires_at: moldSession.expires_at };
+      }
+    }
+  }
 
   if (!session) {
     return null;

@@ -1,11 +1,11 @@
-import { deleteSakeRecord, getSakeRecord, updateSakeRecord } from "../../_shared/sake";
+import { fetchSingleSakeRecordEntry, updateSakeRecordEntry, deleteSakeRecordEntry } from "../../_shared/glue";
 import type { AppEnv } from "../../_shared/auth";
 
-export const onRequestGet: PagesFunction<AppEnv> = async ({ env, params, request }) =>
-  getSakeRecord(request, env, params.id);
+export const onRequestGet: PagesFunction<AppEnv> = async ({ env, params, request, executionCtx }) =>
+  fetchSingleSakeRecordEntry(request, env, String(params.id), executionCtx);
 
-export const onRequestPut: PagesFunction<AppEnv> = async ({ env, params, request }) =>
-  updateSakeRecord(request, env, params.id);
+export const onRequestPut: PagesFunction<AppEnv> = async ({ env, params, request, executionCtx }) =>
+  updateSakeRecordEntry(request, env, String(params.id), executionCtx);
 
-export const onRequestDelete: PagesFunction<AppEnv> = async ({ env, params, request }) =>
-  deleteSakeRecord(request, env, params.id);
+export const onRequestDelete: PagesFunction<AppEnv> = async ({ env, params, request, executionCtx }) =>
+  deleteSakeRecordEntry(request, env, String(params.id), executionCtx);

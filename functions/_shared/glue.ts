@@ -35,6 +35,20 @@ export function getMappedEnv(env: AppEnv) {
   };
 }
 
+export async function authorizeRecordOwner(db: any, sessionUserId: string, recordIdStr: string) {
+  const userRow = await db.prepare("SELECT id FROM users WHERE legacy_id = ? OR id = ?").bind(sessionUserId, sessionUserId).first<{ id: number }>();
+  if (!userRow) return { error: "unauthorized", status: 401, userIntId: null, recordRow: null };
+
+  const recordRow = await db.prepare("SELECT id, legacy_id, owner_id FROM sake_records WHERE legacy_id = ? OR id = ?").bind(recordIdStr, recordIdStr).first<{ id: number; legacy_id: string; owner_id: number }>();
+  if (!recordRow) return { error: "not_found", status: 404, userIntId: userRow.id, recordRow: null };
+
+  if (recordRow.owner_id !== userRow.id) {
+    return { error: "forbidden", status: 403, userIntId: userRow.id, recordRow };
+  }
+
+  return { error: null, status: 200, userIntId: userRow.id, recordRow };
+}
+
 export async function fetchSakeRecordsEntry(request: Request, env: AppEnv, ctx?: any) {
   const mappedEnv = getMappedEnv(env);
   const db = mappedEnv.DB;
@@ -42,7 +56,6 @@ export async function fetchSakeRecordsEntry(request: Request, env: AppEnv, ctx?:
     throw new Error("D1 database binding missing");
   }
 
-  // Session guard per drink-log auth policy
   const session = await readSession(request, mappedEnv);
   if (!session) {
     return new Response(JSON.stringify({ error: "unauthorized" }), {
@@ -51,8 +64,7 @@ export async function fetchSakeRecordsEntry(request: Request, env: AppEnv, ctx?:
     });
   }
 
-  // 1. Fetch records via Mold sub-app (limit=100)
-  const reqRecords = new Request("http://localhost/api/sake_records?limit=100", request);
+  const reqRecords = new Request("http://localhost/api/sake_records?limit=100", { headers: request.headers });
   const resRecords = await moldApp.fetch(reqRecords, mappedEnv, ctx);
   if (resRecords.status !== 200) {
     return resRecords;
@@ -61,19 +73,16 @@ export async function fetchSakeRecordsEntry(request: Request, env: AppEnv, ctx?:
   const recordsData = (await resRecords.json()) as { data?: any[] };
   const records = recordsData.data || [];
 
-  // Filter records by session owner
   const userRow = await db.prepare("SELECT id FROM users WHERE legacy_id = ? OR id = ?").bind(session.userId, session.userId).first<{ id: number }>();
   const currentOwnerId = userRow ? userRow.id : null;
   const userRecords = currentOwnerId ? records.filter((r: any) => r.owner_id === currentOwnerId) : [];
 
-  // 2. Fetch images and tags via Mold sub-app (limit=100)
-  const resImages = await moldApp.fetch(new Request("http://localhost/api/sake_images?limit=100", request), mappedEnv, ctx);
-  const resTags = await moldApp.fetch(new Request("http://localhost/api/tags?limit=100", request), mappedEnv, ctx);
+  const resImages = await moldApp.fetch(new Request("http://localhost/api/sake_images?limit=100", { headers: request.headers }), mappedEnv, ctx);
+  const resTags = await moldApp.fetch(new Request("http://localhost/api/tags?limit=100", { headers: request.headers }), mappedEnv, ctx);
 
   const rawImages = ((await resImages.json()) as { data?: any[] }).data || [];
   const rawTags = ((await resTags.json()) as { data?: any[] }).data || [];
 
-  // 3. Fetch record_tags directly from D1 (RecordTag permissions are role:admin for REST)
   const recordIds = userRecords.map((r: any) => r.id);
   let rawRecordTags: any[] = [];
   if (recordIds.length > 0) {
@@ -85,7 +94,6 @@ export async function fetchSakeRecordsEntry(request: Request, env: AppEnv, ctx?:
     rawRecordTags = stmt.results || [];
   }
 
-  // 4. DYNAMIC USER & ID REMAPPING LAYER
   const ownerIds = Array.from(
     new Set([
       ...userRecords.map((r: any) => r.owner_id),
@@ -149,7 +157,6 @@ export async function fetchSakeRecordsEntry(request: Request, env: AppEnv, ctx?:
     created_at: rt.created_at,
   }));
 
-  // 5. Group by record_id
   const imagesByRecordId = new Map<string, any[]>();
   for (const img of remappedImages) {
     const list = imagesByRecordId.get(img.record_id) || [];
@@ -165,7 +172,6 @@ export async function fetchSakeRecordsEntry(request: Request, env: AppEnv, ctx?:
     tagsByRecordId.set(recordKey, list);
   }
 
-  // 6. Build entry objects
   const entries = remappedRecords.map((rec: any) =>
     buildEntry(
       rec,
@@ -182,6 +188,196 @@ export async function fetchSakeRecordsEntry(request: Request, env: AppEnv, ctx?:
       "Cache-Control": "no-store",
     },
   });
+}
+
+export async function fetchSingleSakeRecordEntry(request: Request, env: AppEnv, recordId: string, ctx?: any) {
+  const mappedEnv = getMappedEnv(env);
+  const db = mappedEnv.DB;
+  if (!db) throw new Error("D1 database binding missing");
+
+  const session = await readSession(request, mappedEnv);
+  if (!session) {
+    return new Response(JSON.stringify({ error: "unauthorized" }), {
+      status: 401,
+      headers: { "Content-Type": "application/json; charset=utf-8" },
+    });
+  }
+
+  const authResult = await authorizeRecordOwner(db, session.userId, recordId);
+  if (authResult.error) {
+    return new Response(JSON.stringify({ error: authResult.error }), {
+      status: authResult.status,
+      headers: { "Content-Type": "application/json; charset=utf-8" },
+    });
+  }
+
+  const allEntriesRes = await fetchSakeRecordsEntry(request, env, ctx);
+  if (allEntriesRes.status !== 200) return allEntriesRes;
+
+  const entries = (await allEntriesRes.json()) as any[];
+  const single = entries.find((e: any) => e.id === authResult.recordRow?.legacy_id || String(e.id) === String(authResult.recordRow?.id));
+  if (!single) {
+    return new Response(JSON.stringify({ error: "not_found" }), {
+      status: 404,
+      headers: { "Content-Type": "application/json; charset=utf-8" },
+    });
+  }
+
+  return new Response(JSON.stringify(single), {
+    status: 200,
+    headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" },
+  });
+}
+
+export async function createSakeRecordEntry(request: Request, env: AppEnv, ctx?: any) {
+  const mappedEnv = getMappedEnv(env);
+  const db = mappedEnv.DB;
+  if (!db) throw new Error("D1 database binding missing");
+
+  const session = await readSession(request, mappedEnv);
+  if (!session) {
+    return new Response(JSON.stringify({ error: "unauthorized" }), {
+      status: 401,
+      headers: { "Content-Type": "application/json; charset=utf-8" },
+    });
+  }
+
+  const userRow = await db.prepare("SELECT id FROM users WHERE legacy_id = ? OR id = ?").bind(session.userId, session.userId).first<{ id: number }>();
+  if (!userRow) {
+    return new Response(JSON.stringify({ error: "unauthorized" }), {
+      status: 401,
+      headers: { "Content-Type": "application/json; charset=utf-8" },
+    });
+  }
+
+  const payload = (await request.json()) as any;
+  const legacyId = crypto.randomUUID();
+  const moldPayload = {
+    ...payload,
+    legacy_id: legacyId,
+    owner_id: userRow.id,
+    drink_type: "sake",
+  };
+
+  const reqMold = new Request("http://localhost/api/sake_records", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Cookie: request.headers.get("Cookie") || "",
+    },
+    body: JSON.stringify(moldPayload),
+  });
+
+  const resMold = await moldApp.fetch(reqMold, mappedEnv, ctx);
+  if (resMold.status !== 201) return resMold;
+
+  const moldData = (await resMold.json()) as { data?: any };
+  const createdRecord = moldData.data;
+
+  // Insert tag_ids into record_tags join table
+  if (Array.isArray(payload.tag_ids) && payload.tag_ids.length > 0 && createdRecord) {
+    for (const tagIdStr of payload.tag_ids) {
+      const tagRow = await db.prepare("SELECT id FROM tags WHERE legacy_id = ? OR id = ?").bind(tagIdStr, tagIdStr).first<{ id: number }>();
+      if (tagRow) {
+        await db.prepare("INSERT INTO record_tags (sake_record_id, tag_id, created_at, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT DO NOTHING")
+          .bind(createdRecord.id, tagRow.id, new Date().toISOString(), new Date().toISOString())
+          .run();
+      }
+    }
+  }
+
+  return fetchSingleSakeRecordEntry(request, env, legacyId, ctx);
+}
+
+export async function updateSakeRecordEntry(request: Request, env: AppEnv, recordId: string, ctx?: any) {
+  const mappedEnv = getMappedEnv(env);
+  const db = mappedEnv.DB;
+  if (!db) throw new Error("D1 database binding missing");
+
+  const session = await readSession(request, mappedEnv);
+  if (!session) {
+    return new Response(JSON.stringify({ error: "unauthorized" }), {
+      status: 401,
+      headers: { "Content-Type": "application/json; charset=utf-8" },
+    });
+  }
+
+  const authResult = await authorizeRecordOwner(db, session.userId, recordId);
+  if (authResult.error) {
+    return new Response(JSON.stringify({ error: authResult.error }), {
+      status: authResult.status,
+      headers: { "Content-Type": "application/json; charset=utf-8" },
+    });
+  }
+
+  const recordRow = authResult.recordRow!;
+  const payload = (await request.json()) as any;
+
+  const reqMold = new Request(`http://localhost/api/sake_records/${recordRow.id}`, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+      Cookie: request.headers.get("Cookie") || "",
+    },
+    body: JSON.stringify(payload),
+  });
+
+  const resMold = await moldApp.fetch(reqMold, mappedEnv, ctx);
+  if (resMold.status !== 200) return resMold;
+
+  // Sync tag_ids in record_tags table
+  if (Array.isArray(payload.tag_ids)) {
+    await db.prepare("DELETE FROM record_tags WHERE sake_record_id = ?").bind(recordRow.id).run();
+    for (const tagIdStr of payload.tag_ids) {
+      const tagRow = await db.prepare("SELECT id FROM tags WHERE legacy_id = ? OR id = ?").bind(tagIdStr, tagIdStr).first<{ id: number }>();
+      if (tagRow) {
+        await db.prepare("INSERT INTO record_tags (sake_record_id, tag_id, created_at, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT DO NOTHING")
+          .bind(recordRow.id, tagRow.id, new Date().toISOString(), new Date().toISOString())
+          .run();
+      }
+    }
+  }
+
+  return fetchSingleSakeRecordEntry(request, env, recordId, ctx);
+}
+
+export async function deleteSakeRecordEntry(request: Request, env: AppEnv, recordId: string, ctx?: any) {
+  const mappedEnv = getMappedEnv(env);
+  const db = mappedEnv.DB;
+  if (!db) throw new Error("D1 database binding missing");
+
+  const session = await readSession(request, mappedEnv);
+  if (!session) {
+    return new Response(JSON.stringify({ error: "unauthorized" }), {
+      status: 401,
+      headers: { "Content-Type": "application/json; charset=utf-8" },
+    });
+  }
+
+  const authResult = await authorizeRecordOwner(db, session.userId, recordId);
+  if (authResult.error) {
+    return new Response(JSON.stringify({ error: authResult.error }), {
+      status: authResult.status,
+      headers: { "Content-Type": "application/json; charset=utf-8" },
+    });
+  }
+
+  const recordRow = authResult.recordRow!;
+
+  // 1. Delete associated record_tags
+  await db.prepare("DELETE FROM record_tags WHERE sake_record_id = ?").bind(recordRow.id).run();
+
+  // 2. Delete record via Mold Sub-App
+  const reqMold = new Request(`http://localhost/api/sake_records/${recordRow.id}`, {
+    method: "DELETE",
+    headers: {
+      Cookie: request.headers.get("Cookie") || "",
+    },
+  });
+  const resMold = await moldApp.fetch(reqMold, mappedEnv, ctx);
+  if (resMold.status !== 200 && resMold.status !== 204) return resMold;
+
+  return new Response(null, { status: 204 });
 }
 
 export { moldApp };
