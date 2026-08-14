@@ -7,9 +7,20 @@ export type ThreeStepRatingValue = 1 | 2 | 3;
 
 export type SakeTagGroup = "taste" | "aroma" | "mood";
 
+export interface MoldResponse<T> {
+  data: T;
+  meta?: {
+    total?: number;
+    offset?: number;
+    limit?: number;
+    has_more?: boolean;
+  };
+}
+
 export interface SakeRecord {
-  id: string;
-  owner_id: string;
+  id: number | string;
+  legacy_id?: string | null;
+  owner_id: number | string;
   drink_type: DrinkType;
   name: string;
   region: string | null;
@@ -35,9 +46,10 @@ export interface SakeRecord {
 }
 
 export interface SakeImage {
-  id: string;
-  owner_id: string;
-  record_id: string;
+  id: number | string;
+  legacy_id?: string | null;
+  owner_id: number | string;
+  record_id: number | string;
   image_key: string;
   thumbnail_key: string | null;
   data_url: string;
@@ -49,8 +61,9 @@ export interface SakeImage {
 }
 
 export interface SakeTag {
-  id: string;
-  owner_id: string | null;
+  id: number | string;
+  legacy_id?: string | null;
+  owner_id: number | string | null;
   drink_type: DrinkType;
   tag_group: SakeTagGroup;
   label: string;
@@ -59,13 +72,16 @@ export interface SakeTag {
 }
 
 export interface SakeRecordTag {
-  record_id: string;
-  tag_id: string;
-  created_at: string;
+  id?: number | string;
+  owner_id?: number | string;
+  sake_record_id: number | string;
+  record_id?: number | string; // Alias for backward compatibility if needed
+  tag_id: number | string;
+  created_at?: string;
 }
 
 export interface SakeRecordEntry {
-  id: string;
+  id: number | string;
   record: SakeRecord;
   images: SakeImage[];
   tags: SakeTag[];
@@ -73,7 +89,7 @@ export interface SakeRecordEntry {
 }
 
 export interface SakeDraftImage {
-  id: string;
+  id: number | string;
   data_url: string;
   thumbnail_data_url?: string;
   mime_type: string;
@@ -102,5 +118,5 @@ export interface SakeDraft {
   companions: string;
   food_pairing: string;
   images: SakeDraftImage[];
-  selected_tag_ids: string[];
+  selected_tag_ids: (number | string)[];
 }
