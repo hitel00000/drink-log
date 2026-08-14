@@ -172,11 +172,21 @@ async function fetchAllPages<T>(basePath: string): Promise<T[]> {
   let offset = 0;
   let allItems: T[] = [];
   let hasMore = true;
+  const maxSafetyIterations = 100;
+  let iteration = 0;
 
-  while (hasMore) {
+  while (hasMore && iteration < maxSafetyIterations) {
+    iteration++;
     const separator = basePath.includes("?") ? "&" : "?";
     const path = `${basePath}${separator}limit=${limit}&offset=${offset}`;
-    const raw = await cloudRequest<any>(path);
+
+    let raw: any;
+    try {
+      raw = await cloudRequest<any>(path);
+    } catch (error) {
+      console.error(`fetchAllPages failed on ${path}:`, error);
+      break;
+    }
 
     let items: T[] = [];
     if (raw && typeof raw === "object" && "data" in raw && Array.isArray(raw.data)) {
@@ -185,11 +195,16 @@ async function fetchAllPages<T>(basePath: string): Promise<T[]> {
       items = raw as T[];
     }
 
+    if (items.length === 0) {
+      break;
+    }
+
     allItems = allItems.concat(items);
 
-    if (items.length < limit || (raw?.meta && raw.meta.has_more === false)) {
+    const total = typeof raw?.meta?.total === "number" ? raw.meta.total : null;
+    if (total !== null && allItems.length >= total) {
       hasMore = false;
-    } else if (items.length === 0) {
+    } else if (items.length < limit) {
       hasMore = false;
     } else {
       offset += items.length;
@@ -1180,6 +1195,9 @@ export async function saveSakeRecord(
 
   if (cloudStorageEnabled) {
     let createdRecordId: number | string | null = null;
+    const createdImageIds: (number | string)[] = [];
+    const createdRecordTagIds: (number | string)[] = [];
+
     try {
       const recordBody = {
         drink_type: "sake",
@@ -1219,10 +1237,13 @@ export async function saveSakeRecord(
           file_name: imgDraft.file_name,
           display_order: imgDraft.display_order,
         };
-        await cloudFetchData<SakeImage>(CLOUD_SAKE_IMAGES_PATH, {
+        const createdImg = await cloudFetchData<SakeImage>(CLOUD_SAKE_IMAGES_PATH, {
           method: "POST",
           body: JSON.stringify(imgBody),
         });
+        if (createdImg?.id) {
+          createdImageIds.push(createdImg.id);
+        }
       }
 
       for (const tagId of draft.selected_tag_ids) {
@@ -1230,10 +1251,13 @@ export async function saveSakeRecord(
           sake_record_id: createdRecordId,
           tag_id: tagId,
         };
-        await cloudFetchData<SakeRecordTag>(CLOUD_RECORD_TAGS_PATH, {
+        const createdRt = await cloudFetchData<SakeRecordTag>(CLOUD_RECORD_TAGS_PATH, {
           method: "POST",
           body: JSON.stringify(rtBody),
         });
+        if (createdRt?.id) {
+          createdRecordTagIds.push(createdRt.id);
+        }
       }
 
       const entry = await getSakeRecordById(createdRecordId);
@@ -1242,7 +1266,20 @@ export async function saveSakeRecord(
       }
       return entry;
     } catch (error) {
-      console.error("Save sake record failed. Rolling back created record...", error);
+      console.error("Save sake record failed. Rolling back all created items...", error);
+
+      for (const rtId of createdRecordTagIds) {
+        await cloudRequest(`${CLOUD_RECORD_TAGS_PATH}/${encodeURIComponent(String(rtId))}`, {
+          method: "DELETE",
+        }).catch(() => {});
+      }
+
+      for (const imgId of createdImageIds) {
+        await cloudRequest(`${CLOUD_SAKE_IMAGES_PATH}/${encodeURIComponent(String(imgId))}`, {
+          method: "DELETE",
+        }).catch(() => {});
+      }
+
       if (createdRecordId !== null) {
         await cloudRequest(`${CLOUD_SAKE_RECORDS_PATH}/${encodeURIComponent(String(createdRecordId))}`, {
           method: "DELETE",
