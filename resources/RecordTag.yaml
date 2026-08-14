@@ -5,6 +5,9 @@ resource:
   soft_delete: false
 
 fields:
+  - name: owner_id
+    type: int
+    nullable: false
   - name: sake_record_id
     type: int
     nullable: false
@@ -13,6 +16,10 @@ fields:
     nullable: false
 
 relations:
+  - name: owner
+    kind: belongs_to
+    target: User
+    foreign_key: owner_id
   - name: sake_record
     kind: belongs_to
     target: SakeRecord
@@ -27,8 +34,9 @@ constraints:
     - [sake_record_id, tag_id]
 
 auth:
+  ownership_field: owner_id
   permissions:
-    create: role:admin
-    read: role:admin
-    update: role:admin
-    delete: role:admin
+    create: authenticated
+    read: owner
+    update: owner
+    delete: owner
