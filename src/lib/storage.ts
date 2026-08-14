@@ -1473,6 +1473,27 @@ export async function deleteSakeRecord(
   ownerId: number | string = LOCAL_OWNER_ID,
 ): Promise<void> {
   if (cloudStorageEnabled) {
+    const [existingImages, existingRecordTags] = await Promise.all([
+      fetchAllPages<SakeImage>(CLOUD_SAKE_IMAGES_PATH),
+      fetchAllPages<SakeRecordTag>(CLOUD_RECORD_TAGS_PATH),
+    ]);
+
+    const targetImages = existingImages.filter((img) => String(img.record_id) === String(id));
+    const targetRecordTags = existingRecordTags.filter(
+      (rt) => String(rt.sake_record_id ?? rt.record_id) === String(id),
+    );
+
+    await Promise.all([
+      ...targetRecordTags.map((rt) =>
+        rt.id
+          ? cloudRequest(`${CLOUD_RECORD_TAGS_PATH}/${encodeURIComponent(String(rt.id))}`, { method: "DELETE" })
+          : Promise.resolve(),
+      ),
+      ...targetImages.map((img) =>
+        cloudRequest(`${CLOUD_SAKE_IMAGES_PATH}/${encodeURIComponent(String(img.id))}`, { method: "DELETE" }),
+      ),
+    ]);
+
     await cloudRequest<void>(`${CLOUD_SAKE_RECORDS_PATH}/${encodeURIComponent(String(id))}`, {
       method: "DELETE",
     });
