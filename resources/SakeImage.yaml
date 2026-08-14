@@ -17,10 +17,10 @@ fields:
     type: int
     nullable: false
   - name: image_key
-    type: blob
+    type: text
     nullable: false
   - name: thumbnail_key
-    type: blob
+    type: text
     nullable: true
   - name: mime_type
     type: string
