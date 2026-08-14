@@ -702,8 +702,14 @@ function normalizeOptionalText(value: string) {
   return trimmed.length > 0 ? trimmed : null;
 }
 
-function normalizeSelectedTagIds(tagIds: string[]) {
-  return Array.from(new Set(tagIds.map((tagId) => tagId.trim()).filter(Boolean)));
+function normalizeSelectedTagIds(tagIds: (number | string)[]) {
+  return Array.from(
+    new Set(
+      tagIds
+        .map((tagId) => (typeof tagId === "string" ? tagId.trim() : tagId))
+        .filter((tagId): tagId is number | string => Boolean(tagId)),
+    ),
+  );
 }
 
 function normalizeSakeTagLabelForCompare(label: string) {
@@ -760,7 +766,7 @@ function buildSakeEntryFromDraft(
   ownerId: string,
   createdAt: string,
   updatedAt: string,
-  existingImagesById = new Map<string, SakeImage>(),
+  existingImagesById = new Map<number | string, SakeImage>(),
 ): { record: SakeRecord; images: SakeImage[]; recordTags: SakeRecordTag[] } {
   const name = draft.name.trim();
   if (!name) {
@@ -795,7 +801,7 @@ function buildSakeEntryFromDraft(
   };
 
   const images = draft.images.map((image, index) => {
-    const existingImage = existingImagesById.get(image.id);
+    const existingImage = existingImagesById.get(image.id) ?? existingImagesById.get(String(image.id));
 
     return {
       id: image.id,
@@ -813,7 +819,8 @@ function buildSakeEntryFromDraft(
     };
   });
 
-  const recordTags = normalizeSelectedTagIds(draft.selected_tag_ids).map((tagId) => ({
+  const recordTags: SakeRecordTag[] = normalizeSelectedTagIds(draft.selected_tag_ids).map((tagId) => ({
+    sake_record_id: recordId,
     record_id: recordId,
     tag_id: tagId,
     created_at: updatedAt,
@@ -1382,7 +1389,7 @@ export async function updateSakeRecord(
           getAllByIndex<SakeImage>(stores[SAKE_IMAGES_STORE], "record_id", stringId),
           getAllByIndex<SakeRecordTag>(stores[SAKE_RECORD_TAGS_STORE], "record_id", stringId),
         ]);
-        const existingImagesById = new Map(
+        const existingImagesById = new Map<number | string, SakeImage>(
           existingImages.map((image) => [image.id, image]),
         );
         const now = new Date().toISOString();
