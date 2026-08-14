@@ -548,7 +548,7 @@ function App() {
     setDraft((current) => ({ ...current, [key]: value }));
   }
 
-  function toggleTag(tagId: string) {
+  function toggleTag(tagId: number | string) {
     setDraft((current) => {
       const selected = new Set(current.selected_tag_ids);
       if (selected.has(tagId)) {
@@ -627,7 +627,7 @@ function App() {
     }));
   }
 
-  function handleRemoveImage(imageId: string) {
+  function handleRemoveImage(imageId: number | string) {
     setDraft((current) => ({
       ...current,
       images: current.images
@@ -685,7 +685,7 @@ function App() {
       setSelectedEntry(entry);
       setDraft(createInitialSakeDraft());
       setEditBaseline(null);
-      navigateTo({ page: "detail", id: entry.id });
+      navigateTo({ page: "detail", id: String(entry.id) });
       setStatusMessage(usesLocalStorage ? "이 기기에 저장했습니다." : "클라우드에 저장했습니다.");
     } catch (error) {
       handleStorageError(error);
@@ -694,7 +694,7 @@ function App() {
     }
   }
 
-  async function handleDeleteRecord(recordId: string) {
+  async function handleDeleteRecord(recordId: number | string) {
     if (!canUseStorage) {
       setStatusMessage(
         needsCloudLogin
@@ -1165,7 +1165,7 @@ function App() {
                 key={entry.id}
                 type="button"
                 className="log-card log-card-button"
-                onClick={() => handleNavigate({ page: "detail", id: entry.id })}
+                onClick={() => handleNavigate({ page: "detail", id: String(entry.id) })}
               >
                 <div className="log-thumbnail" aria-hidden="true">
                   {entry.images[0]?.thumbnail_data_url || entry.images[0]?.data_url ? (
@@ -1355,7 +1355,7 @@ function App() {
                 <button
                   type="button"
                   className="ghost-button"
-                  onClick={() => handleNavigate({ page: "edit", id: selectedEntry.id })}
+                  onClick={() => handleNavigate({ page: "edit", id: String(selectedEntry.id) })}
                 >
                   수정
                 </button>
