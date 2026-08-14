@@ -105,15 +105,6 @@ async function getAuthUser(c: any): Promise<AuthUser | null> {
 app.get('/', (c) => c.text('Mold Cloudflare Workers Target API'));
 
 const relMetadata: Record<string, Record<string, { kind: string; targetTable: string; fk: string; permRead: string; ownershipField: string; softDelete: boolean; pwdFields: string[] }>> = {
-  'tags': {
-    'owner': { kind: 'belongs_to', targetTable: 'users', fk: 'owner_id', permRead: 'authenticated', ownershipField: 'id', softDelete: false, pwdFields: [] },
-  },
-  'users': {
-  },
-  'record_tags': {
-    'sake_record': { kind: 'belongs_to', targetTable: 'sake_records', fk: 'sake_record_id', permRead: 'owner', ownershipField: 'owner_id', softDelete: false, pwdFields: [] },
-    'tag': { kind: 'belongs_to', targetTable: 'tags', fk: 'tag_id', permRead: 'owner', ownershipField: 'owner_id', softDelete: false, pwdFields: [] },
-  },
   'sake_images': {
     'owner': { kind: 'belongs_to', targetTable: 'users', fk: 'owner_id', permRead: 'authenticated', ownershipField: 'id', softDelete: false, pwdFields: [] },
     'record': { kind: 'belongs_to', targetTable: 'sake_records', fk: 'record_id', permRead: 'owner', ownershipField: 'owner_id', softDelete: false, pwdFields: [] },
@@ -122,6 +113,15 @@ const relMetadata: Record<string, Record<string, { kind: string; targetTable: st
     'owner': { kind: 'belongs_to', targetTable: 'users', fk: 'owner_id', permRead: 'authenticated', ownershipField: 'id', softDelete: false, pwdFields: [] },
     'images': { kind: 'has_many', targetTable: 'sake_images', fk: 'record_id', permRead: 'owner', ownershipField: 'owner_id', softDelete: false, pwdFields: [] },
     'record_tags': { kind: 'has_many', targetTable: 'record_tags', fk: 'sake_record_id', permRead: 'role:admin', ownershipField: '', softDelete: false, pwdFields: [] },
+  },
+  'tags': {
+    'owner': { kind: 'belongs_to', targetTable: 'users', fk: 'owner_id', permRead: 'authenticated', ownershipField: 'id', softDelete: false, pwdFields: [] },
+  },
+  'users': {
+  },
+  'record_tags': {
+    'sake_record': { kind: 'belongs_to', targetTable: 'sake_records', fk: 'sake_record_id', permRead: 'owner', ownershipField: 'owner_id', softDelete: false, pwdFields: [] },
+    'tag': { kind: 'belongs_to', targetTable: 'tags', fk: 'tag_id', permRead: 'owner', ownershipField: 'owner_id', softDelete: false, pwdFields: [] },
   },
 };
 
@@ -197,788 +197,6 @@ async function processIncludes(c: any, currentTable: string, records: any[], inc
   return null;
 }
 
-
-// LIST /api/tags
-app.get('/api/tags', async (c) => {
-  const authUser = await getAuthUser(c);
-  const limit = Math.min(parseInt(c.req.query('limit') || '20', 10), 100);
-  const offset = Math.max(parseInt(c.req.query('offset') || '0', 10), 0);
-
-  const whereConds: string[] = [];
-  const params: any[] = [];
-  if (!authUser || authUser.role !== 'admin') {
-    if (authUser) {
-      whereConds.push('("owner_id" = ? OR "owner_id" IS NULL)');
-      params.push(authUser.id);
-    } else {
-      whereConds.push('"owner_id" IS NULL');
-    }
-  }
-  const whereClause = whereConds.length > 0 ? ' WHERE ' + whereConds.join(' AND ') : '';
-  const countSql = `SELECT COUNT(*) as total FROM "tags"${whereClause}`;
-  const countStmt = await c.env.DB.prepare(countSql).bind(...params).first<{ total: number }>();
-  const total = countStmt ? countStmt.total : 0;
-  const querySql = `SELECT * FROM "tags"${whereClause} ORDER BY id ASC LIMIT ? OFFSET ?`;
-  const { results } = await c.env.DB.prepare(querySql).bind(...params, limit, offset).all();
-  const sanitized = (results || []).map((r: any) => sanitizeRecord(r, []));
-  const incErr = await processIncludes(c, 'tags', sanitized, c.req.query('include'), authUser);
-  if (incErr) return incErr;
-  return c.json({
-    data: sanitized,
-    meta: { total, limit, offset }
-  });
-});
-
-// DETAIL /api/tags/:id
-app.get('/api/tags/:id', async (c) => {
-  const authUser = await getAuthUser(c);
-  const id = c.req.param('id');
-  const record = await c.env.DB.prepare('SELECT * FROM "tags" WHERE id = ?').bind(id).first();
-  if (!record) {
-    return writeError(c, 404, 'NOT_FOUND', 'record not found');
-  }
-  const ownerVal = (record as any)['owner_id'];
-  if (ownerVal !== null && ownerVal !== undefined) {
-    if (!authUser) {
-      return writeError(c, 401, 'UNAUTHORIZED', 'authentication required');
-    }
-    if (authUser.role !== 'admin' && ownerVal != authUser.id) {
-      return writeError(c, 403, 'FORBIDDEN', 'forbidden');
-    }
-  }
-  const sanitized = sanitizeRecord(record, []);
-  const incErr = await processIncludes(c, 'tags', [sanitized], c.req.query('include'), authUser);
-  if (incErr) return incErr;
-  return c.json({ data: sanitized });
-});
-
-// CREATE /api/tags
-app.post('/api/tags', async (c) => {
-  const authUser = await getAuthUser(c);
-  if (!authUser) {
-    return writeError(c, 401, 'UNAUTHORIZED', 'authentication required');
-  }
-  let body: any = {};
-  let formData: FormData | null = null;
-  const rawHeader = c.req.header('content-type') || c.req.header('Content-Type') || (c.req.raw && c.req.raw.headers ? c.req.raw.headers.get('content-type') : '') || '';
-  const contentType = String(rawHeader).toLowerCase();
-  if (contentType.includes('multipart/form-data')) {
-    try {
-      formData = await c.req.formData();
-      formData.forEach((val, key) => {
-        if (typeof val === 'string') { body[key] = (val !== '' && !isNaN(Number(val))) ? Number(val) : val; }
-      });
-    } catch (e) {
-      return writeError(c, 400, 'INVALID_MULTIPART', 'failed to parse multipart body');
-    }
-  } else {
-    try {
-      body = await c.req.json();
-    } catch (e) {
-      return writeError(c, 400, 'INVALID_JSON', 'failed to parse json body');
-    }
-  }
-
-  if (body['role'] === 'admin' && (!authUser || authUser.role !== 'admin')) {
-    return writeError(c, 403, 'FORBIDDEN', 'cannot grant admin role');
-  }
-  if (authUser) {
-    body['owner_id'] = authUser.id;
-  } else {
-    delete body['owner_id'];
-  }
-  if (body['legacy_id'] !== undefined && body['legacy_id'] !== null && typeof body['legacy_id'] !== 'string') {
-    return writeError(c, 400, 'VALIDATION_FAILED', 'field legacy_id must be a string');
-  }
-  if (body['owner_id'] !== undefined && body['owner_id'] !== null && typeof body['owner_id'] !== 'number') {
-    return writeError(c, 400, 'VALIDATION_FAILED', 'field owner_id must be a number');
-  }
-  if (body['drink_type'] !== undefined && body['drink_type'] !== null && typeof body['drink_type'] !== 'string') {
-    return writeError(c, 400, 'VALIDATION_FAILED', 'field drink_type must be a string');
-  }
-  if (body['tag_group'] === undefined || body['tag_group'] === null) {
-    return writeError(c, 400, 'VALIDATION_FAILED', 'field tag_group is required');
-  }
-  if (body['label'] === undefined || body['label'] === null) {
-    return writeError(c, 400, 'VALIDATION_FAILED', 'field label is required');
-  }
-  if (body['label'] !== undefined && body['label'] !== null && typeof body['label'] !== 'string') {
-    return writeError(c, 400, 'VALIDATION_FAILED', 'field label must be a string');
-  }
-  if (body['is_default'] !== undefined && body['is_default'] !== null && typeof body['is_default'] !== 'boolean') {
-    return writeError(c, 400, 'VALIDATION_FAILED', 'field is_default must be a boolean');
-  }
-
-  const now = new Date().toISOString();
-  const insertSql = `INSERT INTO "tags" ("legacy_id", "owner_id", "drink_type", "tag_group", "label", "is_default", "created_at", "updated_at") VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`;
-  let created: any = null;
-  try {
-    created = await c.env.DB.prepare(insertSql).bind(body['legacy_id'] !== undefined ? body['legacy_id'] : null, body['owner_id'] !== undefined ? body['owner_id'] : null, body['drink_type'] !== undefined ? body['drink_type'] : 'sake', body['tag_group'] !== undefined ? body['tag_group'] : null, body['label'] !== undefined ? body['label'] : null, body['is_default'] !== undefined ? (body['is_default'] ? 1 : 0) : false, now, now).first<any>();
-  } catch (err: any) {
-    const errMsg = String(err?.message || err);
-    if (errMsg.includes('UNIQUE constraint failed') || errMsg.includes('SQLITE_CONSTRAINT')) {
-      return writeError(c, 400, 'INVALID_INPUT', `unique constraint failed: ${errMsg}`);
-    }
-    return writeError(c, 400, 'INVALID_INPUT', errMsg);
-  }
-  return c.json({ data: sanitizeRecord(created, []) }, 201);
-});
-
-// UPDATE /api/tags/:id
-app.put('/api/tags/:id', async (c) => {
-  const authUser = await getAuthUser(c);
-  if (!authUser) {
-    return writeError(c, 401, 'UNAUTHORIZED', 'authentication required');
-  }
-  const id = c.req.param('id');
-  const existing = await c.env.DB.prepare('SELECT * FROM "tags" WHERE id = ?').bind(id).first();
-  if (!existing) {
-    return writeError(c, 404, 'NOT_FOUND', 'record not found');
-  }
-  const ownerVal = (existing as any)['owner_id'];
-  if (ownerVal === null || ownerVal === undefined) {
-    if (authUser.role !== 'admin') {
-      return writeError(c, 403, 'FORBIDDEN', 'forbidden');
-    }
-  } else if (authUser.role !== 'admin' && ownerVal != authUser.id) {
-    return writeError(c, 403, 'FORBIDDEN', 'forbidden');
-  }
-  let body: any;
-  try {
-    body = await c.req.json();
-  } catch (e) {
-    return writeError(c, 400, 'INVALID_JSON', 'failed to parse json body');
-  }
-
-  if (body['role'] !== undefined && body['role'] !== (existing as any)['role'] && body['role'] === 'admin' && (!authUser || authUser.role !== 'admin')) {
-    return writeError(c, 403, 'FORBIDDEN', 'cannot grant admin role');
-  }
-  const now = new Date().toISOString();
-  const updateSql = `UPDATE "tags" SET "legacy_id" = ?, "owner_id" = ?, "drink_type" = ?, "tag_group" = ?, "label" = ?, "is_default" = ?, "updated_at" = ? WHERE id = ? RETURNING *`;
-  let updated: any = null;
-  try {
-    updated = await c.env.DB.prepare(updateSql).bind(body['legacy_id'] !== undefined ? body['legacy_id'] : (existing as any)['legacy_id'], body['owner_id'] !== undefined ? body['owner_id'] : (existing as any)['owner_id'], body['drink_type'] !== undefined ? body['drink_type'] : (existing as any)['drink_type'], body['tag_group'] !== undefined ? body['tag_group'] : (existing as any)['tag_group'], body['label'] !== undefined ? body['label'] : (existing as any)['label'], body['is_default'] !== undefined ? body['is_default'] : (existing as any)['is_default'], now, id).first();
-  } catch (err: any) {
-    const errMsg = String(err?.message || err);
-    if (errMsg.includes('UNIQUE constraint failed') || errMsg.includes('SQLITE_CONSTRAINT')) {
-      return writeError(c, 400, 'INVALID_INPUT', `unique constraint failed: ${errMsg}`);
-    }
-    return writeError(c, 400, 'INVALID_INPUT', errMsg);
-  }
-  if (!updated) {
-    return writeError(c, 404, 'NOT_FOUND', 'record not found');
-  }
-  return c.json({ data: sanitizeRecord(updated, []) });
-});
-
-// DELETE /api/tags/:id
-app.delete('/api/tags/:id', async (c) => {
-  const authUser = await getAuthUser(c);
-  if (!authUser) {
-    return writeError(c, 401, 'UNAUTHORIZED', 'authentication required');
-  }
-  const id = c.req.param('id');
-  const parsedId = isNaN(Number(id)) ? id : Number(id);
-  const existing = await c.env.DB.prepare('SELECT * FROM "tags" WHERE id = ?').bind(id).first();
-  if (!existing) {
-    return writeError(c, 404, 'NOT_FOUND', 'record not found');
-  }
-  const ownerVal = (existing as any)['owner_id'];
-  if (ownerVal === null || ownerVal === undefined) {
-    if (authUser.role !== 'admin') {
-      return writeError(c, 403, 'FORBIDDEN', 'forbidden');
-    }
-  } else if (authUser.role !== 'admin' && ownerVal != authUser.id) {
-    return writeError(c, 403, 'FORBIDDEN', 'forbidden');
-  }
-  const res = await c.env.DB.prepare('DELETE FROM "tags" WHERE id = ?').bind(id).run();
-  if (!res.meta.changes) {
-    return writeError(c, 404, 'NOT_FOUND', 'record not found');
-  }
-  return c.json({ data: { deleted: true, id: parsedId } });
-});
-
-// VIEW LIST /view/tags
-app.get('/view/tags', async (c) => {
-  const authUser = await getAuthUser(c);
-  const whereConds: string[] = [];
-  const params: any[] = [];
-  if (!authUser || authUser.role !== 'admin') {
-    if (authUser) {
-      whereConds.push('("owner_id" = ? OR "owner_id" IS NULL)');
-      params.push(authUser.id);
-    } else {
-      whereConds.push('"owner_id" IS NULL');
-    }
-  }
-  const whereClause = whereConds.length > 0 ? ' WHERE ' + whereConds.join(' AND ') : '';
-  const { results } = await c.env.DB.prepare(`SELECT * FROM "tags"${whereClause} ORDER BY id ASC`).bind(...params).all();
-  const viewRecs = (results || []) as any[];
-  const incErr = await processIncludes(c, 'tags', viewRecs, c.req.query('include'), authUser);
-  if (incErr) return incErr;
-  let html = `<!DOCTYPE html><html><head><title>Tag List</title></head><body>`;
-  html += `<h1>Tag List</h1>`;
-  html += `<a href="/view/tags/new">+ New Tag</a><br/><br/><table border="1"><thead><tr><th>id</th>`;
-  html += `<th>legacy_id</th>`;
-  html += `<th>owner_id</th>`;
-  html += `<th>drink_type</th>`;
-  html += `<th>tag_group</th>`;
-  html += `<th>label</th>`;
-  html += `<th>is_default</th>`;
-  html += `<th>Actions</th></tr></thead><tbody>`;
-  for (const row of viewRecs) {
-    html += `<tr><td>${(row as any).id}</td>`;
-    html += `<td>${escapeHTML((row as any)['legacy_id'])}</td>`;
-    html += `<td>${escapeHTML((row as any)['owner_id'])}</td>`;
-    html += `<td>${escapeHTML((row as any)['drink_type'])}</td>`;
-    html += `<td>${escapeHTML((row as any)['tag_group'])}</td>`;
-    html += `<td>${escapeHTML((row as any)['label'])}</td>`;
-    html += `<td>${escapeHTML((row as any)['is_default'])}</td>`;
-    html += `<td><a href="/view/tags/${(row as any).id}">Detail</a> <a href="/view/tags/${(row as any).id}/edit">Edit</a></td></tr>`;
-  }
-  html += `</tbody></table></body></html>`;
-  return c.html(html);
-});
-
-// VIEW NEW /view/tags/new
-app.get('/view/tags/new', async (c) => {
-  let html = `<!DOCTYPE html><html><head><title>New Tag</title></head><body><h1>New Tag</h1><form method="POST" action="/view/tags">`;
-  html += `<label>legacy_id: <input type="text" name="legacy_id" /></label><br/><br/>`;
-  html += `<label>owner_id: <input type="number" name="owner_id" /></label><br/><br/>`;
-  html += `<label>drink_type: <input type="text" name="drink_type" /></label><br/><br/>`;
-  html += `<label>tag_group: <input type="text" name="tag_group" /></label><br/><br/>`;
-  html += `<label>label: <input type="text" name="label" /></label><br/><br/>`;
-  html += `<label>is_default: <input type="text" name="is_default" /></label><br/><br/>`;
-  html += `<button type="submit">Save</button></form></body></html>`;
-  return c.html(html);
-});
-
-// VIEW CREATE SUBMIT /view/tags
-app.post('/view/tags', async (c) => {
-  const formData = await c.req.formData();
-  const body: any = {};
-  formData.forEach((value, key) => { body[key] = value; });
-  const now = new Date().toISOString();
-  await c.env.DB.prepare(insertSql).bind(body['legacy_id'] !== undefined ? body['legacy_id'] : null, body['owner_id'] !== undefined ? body['owner_id'] : null, body['drink_type'] !== undefined ? body['drink_type'] : 'sake', body['tag_group'] !== undefined ? body['tag_group'] : null, body['label'] !== undefined ? body['label'] : null, body['is_default'] !== undefined ? (body['is_default'] ? 1 : 0) : false, now, now).run();
-  return c.redirect('/view/tags', 303);
-});
-
-// VIEW DETAIL /view/tags/:id
-app.get('/view/tags/:id', async (c) => {
-  const id = c.req.param('id');
-  const record = await c.env.DB.prepare('SELECT * FROM "tags" WHERE id = ?').bind(id).first<any>();
-  if (!record) return c.html('<h1>404 Not Found</h1>', 404);
-  const authUser = await getAuthUser(c);
-  const incErr = await processIncludes(c, 'tags', [record], c.req.query('include'), authUser);
-  if (incErr) return incErr;
-  let html = `<!DOCTYPE html><html><head><title>Tag Detail</title></head><body><h1>Tag #${id}</h1><dl>`;
-  html += `<dt>legacy_id</dt><dd>${escapeHTML(record['legacy_id'])}</dd>`;
-  html += `<dt>owner_id</dt><dd>${escapeHTML(record['owner_id'])}</dd>`;
-  html += `<dt>drink_type</dt><dd>${escapeHTML(record['drink_type'])}</dd>`;
-  html += `<dt>tag_group</dt><dd>${escapeHTML(record['tag_group'])}</dd>`;
-  html += `<dt>label</dt><dd>${escapeHTML(record['label'])}</dd>`;
-  html += `<dt>is_default</dt><dd>${escapeHTML(record['is_default'])}</dd>`;
-  html += `</dl></body></html>`;
-  return c.html(html);
-});
-
-// LIST /api/users
-app.get('/api/users', async (c) => {
-  const authUser = await getAuthUser(c);
-  if (!authUser) {
-    return writeError(c, 401, 'UNAUTHORIZED', 'authentication required');
-  }
-  const limit = Math.min(parseInt(c.req.query('limit') || '20', 10), 100);
-  const offset = Math.max(parseInt(c.req.query('offset') || '0', 10), 0);
-
-  const whereConds: string[] = [];
-  const params: any[] = [];
-  const whereClause = whereConds.length > 0 ? ' WHERE ' + whereConds.join(' AND ') : '';
-  const countSql = `SELECT COUNT(*) as total FROM "users"${whereClause}`;
-  const countStmt = await c.env.DB.prepare(countSql).bind(...params).first<{ total: number }>();
-  const total = countStmt ? countStmt.total : 0;
-  const querySql = `SELECT * FROM "users"${whereClause} ORDER BY id ASC LIMIT ? OFFSET ?`;
-  const { results } = await c.env.DB.prepare(querySql).bind(...params, limit, offset).all();
-  const sanitized = (results || []).map((r: any) => sanitizeRecord(r, []));
-  const incErr = await processIncludes(c, 'users', sanitized, c.req.query('include'), authUser);
-  if (incErr) return incErr;
-  return c.json({
-    data: sanitized,
-    meta: { total, limit, offset }
-  });
-});
-
-// DETAIL /api/users/:id
-app.get('/api/users/:id', async (c) => {
-  const authUser = await getAuthUser(c);
-  if (!authUser) {
-    return writeError(c, 401, 'UNAUTHORIZED', 'authentication required');
-  }
-  const id = c.req.param('id');
-  const record = await c.env.DB.prepare('SELECT * FROM "users" WHERE id = ?').bind(id).first();
-  if (!record) {
-    return writeError(c, 404, 'NOT_FOUND', 'record not found');
-  }
-  const sanitized = sanitizeRecord(record, []);
-  const incErr = await processIncludes(c, 'users', [sanitized], c.req.query('include'), authUser);
-  if (incErr) return incErr;
-  return c.json({ data: sanitized });
-});
-
-// CREATE /api/users
-app.post('/api/users', async (c) => {
-  const authUser = await getAuthUser(c);
-  let body: any = {};
-  let formData: FormData | null = null;
-  const rawHeader = c.req.header('content-type') || c.req.header('Content-Type') || (c.req.raw && c.req.raw.headers ? c.req.raw.headers.get('content-type') : '') || '';
-  const contentType = String(rawHeader).toLowerCase();
-  if (contentType.includes('multipart/form-data')) {
-    try {
-      formData = await c.req.formData();
-      formData.forEach((val, key) => {
-        if (typeof val === 'string') { body[key] = (val !== '' && !isNaN(Number(val))) ? Number(val) : val; }
-      });
-    } catch (e) {
-      return writeError(c, 400, 'INVALID_MULTIPART', 'failed to parse multipart body');
-    }
-  } else {
-    try {
-      body = await c.req.json();
-    } catch (e) {
-      return writeError(c, 400, 'INVALID_JSON', 'failed to parse json body');
-    }
-  }
-
-  if (body['role'] === 'admin' && (!authUser || authUser.role !== 'admin')) {
-    return writeError(c, 403, 'FORBIDDEN', 'cannot grant admin role');
-  }
-  if (body['legacy_id'] !== undefined && body['legacy_id'] !== null && typeof body['legacy_id'] !== 'string') {
-    return writeError(c, 400, 'VALIDATION_FAILED', 'field legacy_id must be a string');
-  }
-  if (body['provider'] === undefined || body['provider'] === null) {
-    return writeError(c, 400, 'VALIDATION_FAILED', 'field provider is required');
-  }
-  if (body['provider'] !== undefined && body['provider'] !== null && typeof body['provider'] !== 'string') {
-    return writeError(c, 400, 'VALIDATION_FAILED', 'field provider must be a string');
-  }
-  if (body['provider_user_id'] === undefined || body['provider_user_id'] === null) {
-    return writeError(c, 400, 'VALIDATION_FAILED', 'field provider_user_id is required');
-  }
-  if (body['provider_user_id'] !== undefined && body['provider_user_id'] !== null && typeof body['provider_user_id'] !== 'string') {
-    return writeError(c, 400, 'VALIDATION_FAILED', 'field provider_user_id must be a string');
-  }
-  if (body['email'] !== undefined && body['email'] !== null && typeof body['email'] !== 'string') {
-    return writeError(c, 400, 'VALIDATION_FAILED', 'field email must be a string');
-  }
-  if (body['display_name'] !== undefined && body['display_name'] !== null && typeof body['display_name'] !== 'string') {
-    return writeError(c, 400, 'VALIDATION_FAILED', 'field display_name must be a string');
-  }
-  if (body['avatar_url'] !== undefined && body['avatar_url'] !== null && typeof body['avatar_url'] !== 'string') {
-    return writeError(c, 400, 'VALIDATION_FAILED', 'field avatar_url must be a string');
-  }
-
-  const now = new Date().toISOString();
-  const insertSql = `INSERT INTO "users" ("legacy_id", "provider", "provider_user_id", "email", "display_name", "avatar_url", "last_login_at", "created_at", "updated_at") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`;
-  let created: any = null;
-  try {
-    created = await c.env.DB.prepare(insertSql).bind(body['legacy_id'] !== undefined ? body['legacy_id'] : null, body['provider'] !== undefined ? body['provider'] : null, body['provider_user_id'] !== undefined ? body['provider_user_id'] : null, body['email'] !== undefined ? body['email'] : null, body['display_name'] !== undefined ? body['display_name'] : null, body['avatar_url'] !== undefined ? body['avatar_url'] : null, body['last_login_at'] !== undefined ? body['last_login_at'] : null, now, now).first<any>();
-  } catch (err: any) {
-    const errMsg = String(err?.message || err);
-    if (errMsg.includes('UNIQUE constraint failed') || errMsg.includes('SQLITE_CONSTRAINT')) {
-      return writeError(c, 400, 'INVALID_INPUT', `unique constraint failed: ${errMsg}`);
-    }
-    return writeError(c, 400, 'INVALID_INPUT', errMsg);
-  }
-  return c.json({ data: sanitizeRecord(created, []) }, 201);
-});
-
-// UPDATE /api/users/:id
-app.put('/api/users/:id', async (c) => {
-  const authUser = await getAuthUser(c);
-  if (!authUser) {
-    return writeError(c, 401, 'UNAUTHORIZED', 'authentication required');
-  }
-  const id = c.req.param('id');
-  const existing = await c.env.DB.prepare('SELECT * FROM "users" WHERE id = ?').bind(id).first();
-  if (!existing) {
-    return writeError(c, 404, 'NOT_FOUND', 'record not found');
-  }
-  const ownerVal = (existing as any)['id'];
-  if (ownerVal === null || ownerVal === undefined) {
-    if (authUser.role !== 'admin') {
-      return writeError(c, 403, 'FORBIDDEN', 'forbidden');
-    }
-  } else if (authUser.role !== 'admin' && ownerVal != authUser.id) {
-    return writeError(c, 403, 'FORBIDDEN', 'forbidden');
-  }
-  let body: any;
-  try {
-    body = await c.req.json();
-  } catch (e) {
-    return writeError(c, 400, 'INVALID_JSON', 'failed to parse json body');
-  }
-
-  if (body['role'] !== undefined && body['role'] !== (existing as any)['role'] && body['role'] === 'admin' && (!authUser || authUser.role !== 'admin')) {
-    return writeError(c, 403, 'FORBIDDEN', 'cannot grant admin role');
-  }
-  const now = new Date().toISOString();
-  const updateSql = `UPDATE "users" SET "legacy_id" = ?, "provider" = ?, "provider_user_id" = ?, "email" = ?, "display_name" = ?, "avatar_url" = ?, "last_login_at" = ?, "updated_at" = ? WHERE id = ? RETURNING *`;
-  let updated: any = null;
-  try {
-    updated = await c.env.DB.prepare(updateSql).bind(body['legacy_id'] !== undefined ? body['legacy_id'] : (existing as any)['legacy_id'], body['provider'] !== undefined ? body['provider'] : (existing as any)['provider'], body['provider_user_id'] !== undefined ? body['provider_user_id'] : (existing as any)['provider_user_id'], body['email'] !== undefined ? body['email'] : (existing as any)['email'], body['display_name'] !== undefined ? body['display_name'] : (existing as any)['display_name'], body['avatar_url'] !== undefined ? body['avatar_url'] : (existing as any)['avatar_url'], body['last_login_at'] !== undefined ? body['last_login_at'] : (existing as any)['last_login_at'], now, id).first();
-  } catch (err: any) {
-    const errMsg = String(err?.message || err);
-    if (errMsg.includes('UNIQUE constraint failed') || errMsg.includes('SQLITE_CONSTRAINT')) {
-      return writeError(c, 400, 'INVALID_INPUT', `unique constraint failed: ${errMsg}`);
-    }
-    return writeError(c, 400, 'INVALID_INPUT', errMsg);
-  }
-  if (!updated) {
-    return writeError(c, 404, 'NOT_FOUND', 'record not found');
-  }
-  return c.json({ data: sanitizeRecord(updated, []) });
-});
-
-// DELETE /api/users/:id
-app.delete('/api/users/:id', async (c) => {
-  const authUser = await getAuthUser(c);
-  if (!authUser) {
-    return writeError(c, 401, 'UNAUTHORIZED', 'authentication required');
-  }
-  const id = c.req.param('id');
-  const parsedId = isNaN(Number(id)) ? id : Number(id);
-  const existing = await c.env.DB.prepare('SELECT * FROM "users" WHERE id = ?').bind(id).first();
-  if (!existing) {
-    return writeError(c, 404, 'NOT_FOUND', 'record not found');
-  }
-  const ownerVal = (existing as any)['id'];
-  if (ownerVal === null || ownerVal === undefined) {
-    if (authUser.role !== 'admin') {
-      return writeError(c, 403, 'FORBIDDEN', 'forbidden');
-    }
-  } else if (authUser.role !== 'admin' && ownerVal != authUser.id) {
-    return writeError(c, 403, 'FORBIDDEN', 'forbidden');
-  }
-  const res = await c.env.DB.prepare('DELETE FROM "users" WHERE id = ?').bind(id).run();
-  if (!res.meta.changes) {
-    return writeError(c, 404, 'NOT_FOUND', 'record not found');
-  }
-  return c.json({ data: { deleted: true, id: parsedId } });
-});
-
-// VIEW LIST /view/users
-app.get('/view/users', async (c) => {
-  const authUser = await getAuthUser(c);
-  const whereConds: string[] = [];
-  const params: any[] = [];
-  const whereClause = whereConds.length > 0 ? ' WHERE ' + whereConds.join(' AND ') : '';
-  const { results } = await c.env.DB.prepare(`SELECT * FROM "users"${whereClause} ORDER BY id ASC`).bind(...params).all();
-  const viewRecs = (results || []) as any[];
-  const incErr = await processIncludes(c, 'users', viewRecs, c.req.query('include'), authUser);
-  if (incErr) return incErr;
-  let html = `<!DOCTYPE html><html><head><title>User List</title></head><body>`;
-  html += `<h1>User List</h1>`;
-  html += `<a href="/view/users/new">+ New User</a><br/><br/><table border="1"><thead><tr><th>id</th>`;
-  html += `<th>legacy_id</th>`;
-  html += `<th>provider</th>`;
-  html += `<th>provider_user_id</th>`;
-  html += `<th>email</th>`;
-  html += `<th>display_name</th>`;
-  html += `<th>avatar_url</th>`;
-  html += `<th>last_login_at</th>`;
-  html += `<th>Actions</th></tr></thead><tbody>`;
-  for (const row of viewRecs) {
-    html += `<tr><td>${(row as any).id}</td>`;
-    html += `<td>${escapeHTML((row as any)['legacy_id'])}</td>`;
-    html += `<td>${escapeHTML((row as any)['provider'])}</td>`;
-    html += `<td>${escapeHTML((row as any)['provider_user_id'])}</td>`;
-    html += `<td>${escapeHTML((row as any)['email'])}</td>`;
-    html += `<td>${escapeHTML((row as any)['display_name'])}</td>`;
-    html += `<td>${escapeHTML((row as any)['avatar_url'])}</td>`;
-    html += `<td>${escapeHTML((row as any)['last_login_at'])}</td>`;
-    html += `<td><a href="/view/users/${(row as any).id}">Detail</a> <a href="/view/users/${(row as any).id}/edit">Edit</a></td></tr>`;
-  }
-  html += `</tbody></table></body></html>`;
-  return c.html(html);
-});
-
-// VIEW NEW /view/users/new
-app.get('/view/users/new', async (c) => {
-  let html = `<!DOCTYPE html><html><head><title>New User</title></head><body><h1>New User</h1><form method="POST" action="/view/users">`;
-  html += `<label>legacy_id: <input type="text" name="legacy_id" /></label><br/><br/>`;
-  html += `<label>provider: <input type="text" name="provider" /></label><br/><br/>`;
-  html += `<label>provider_user_id: <input type="text" name="provider_user_id" /></label><br/><br/>`;
-  html += `<label>email: <input type="text" name="email" /></label><br/><br/>`;
-  html += `<label>display_name: <input type="text" name="display_name" /></label><br/><br/>`;
-  html += `<label>avatar_url: <input type="text" name="avatar_url" /></label><br/><br/>`;
-  html += `<label>last_login_at: <input type="text" name="last_login_at" /></label><br/><br/>`;
-  html += `<button type="submit">Save</button></form></body></html>`;
-  return c.html(html);
-});
-
-// VIEW CREATE SUBMIT /view/users
-app.post('/view/users', async (c) => {
-  const formData = await c.req.formData();
-  const body: any = {};
-  formData.forEach((value, key) => { body[key] = value; });
-  const now = new Date().toISOString();
-  await c.env.DB.prepare(insertSql).bind(body['legacy_id'] !== undefined ? body['legacy_id'] : null, body['provider'] !== undefined ? body['provider'] : null, body['provider_user_id'] !== undefined ? body['provider_user_id'] : null, body['email'] !== undefined ? body['email'] : null, body['display_name'] !== undefined ? body['display_name'] : null, body['avatar_url'] !== undefined ? body['avatar_url'] : null, body['last_login_at'] !== undefined ? body['last_login_at'] : null, now, now).run();
-  return c.redirect('/view/users', 303);
-});
-
-// VIEW DETAIL /view/users/:id
-app.get('/view/users/:id', async (c) => {
-  const id = c.req.param('id');
-  const record = await c.env.DB.prepare('SELECT * FROM "users" WHERE id = ?').bind(id).first<any>();
-  if (!record) return c.html('<h1>404 Not Found</h1>', 404);
-  const authUser = await getAuthUser(c);
-  const incErr = await processIncludes(c, 'users', [record], c.req.query('include'), authUser);
-  if (incErr) return incErr;
-  let html = `<!DOCTYPE html><html><head><title>User Detail</title></head><body><h1>User #${id}</h1><dl>`;
-  html += `<dt>legacy_id</dt><dd>${escapeHTML(record['legacy_id'])}</dd>`;
-  html += `<dt>provider</dt><dd>${escapeHTML(record['provider'])}</dd>`;
-  html += `<dt>provider_user_id</dt><dd>${escapeHTML(record['provider_user_id'])}</dd>`;
-  html += `<dt>email</dt><dd>${escapeHTML(record['email'])}</dd>`;
-  html += `<dt>display_name</dt><dd>${escapeHTML(record['display_name'])}</dd>`;
-  html += `<dt>avatar_url</dt><dd>${escapeHTML(record['avatar_url'])}</dd>`;
-  html += `<dt>last_login_at</dt><dd>${escapeHTML(record['last_login_at'])}</dd>`;
-  html += `</dl></body></html>`;
-  return c.html(html);
-});
-
-// LIST /api/record_tags
-app.get('/api/record_tags', async (c) => {
-  const authUser = await getAuthUser(c);
-  if (!authUser) {
-    return writeError(c, 401, 'UNAUTHORIZED', 'authentication required');
-  }
-  if (authUser.role !== 'admin') {
-    return writeError(c, 403, 'FORBIDDEN', 'forbidden');
-  }
-  const limit = Math.min(parseInt(c.req.query('limit') || '20', 10), 100);
-  const offset = Math.max(parseInt(c.req.query('offset') || '0', 10), 0);
-
-  const whereConds: string[] = [];
-  const params: any[] = [];
-  const whereClause = whereConds.length > 0 ? ' WHERE ' + whereConds.join(' AND ') : '';
-  const countSql = `SELECT COUNT(*) as total FROM "record_tags"${whereClause}`;
-  const countStmt = await c.env.DB.prepare(countSql).bind(...params).first<{ total: number }>();
-  const total = countStmt ? countStmt.total : 0;
-  const querySql = `SELECT * FROM "record_tags"${whereClause} ORDER BY id ASC LIMIT ? OFFSET ?`;
-  const { results } = await c.env.DB.prepare(querySql).bind(...params, limit, offset).all();
-  const sanitized = (results || []).map((r: any) => sanitizeRecord(r, []));
-  const incErr = await processIncludes(c, 'record_tags', sanitized, c.req.query('include'), authUser);
-  if (incErr) return incErr;
-  return c.json({
-    data: sanitized,
-    meta: { total, limit, offset }
-  });
-});
-
-// DETAIL /api/record_tags/:id
-app.get('/api/record_tags/:id', async (c) => {
-  const authUser = await getAuthUser(c);
-  if (!authUser) {
-    return writeError(c, 401, 'UNAUTHORIZED', 'authentication required');
-  }
-  const id = c.req.param('id');
-  const record = await c.env.DB.prepare('SELECT * FROM "record_tags" WHERE id = ?').bind(id).first();
-  if (!record) {
-    return writeError(c, 404, 'NOT_FOUND', 'record not found');
-  }
-  if (!authUser || (authUser.role !== 'admin' && authUser.role !== 'admin')) {
-    return writeError(c, 403, 'FORBIDDEN', 'forbidden');
-  }
-  const sanitized = sanitizeRecord(record, []);
-  const incErr = await processIncludes(c, 'record_tags', [sanitized], c.req.query('include'), authUser);
-  if (incErr) return incErr;
-  return c.json({ data: sanitized });
-});
-
-// CREATE /api/record_tags
-app.post('/api/record_tags', async (c) => {
-  const authUser = await getAuthUser(c);
-  if (!authUser) {
-    return writeError(c, 401, 'UNAUTHORIZED', 'authentication required');
-  }
-  if (!authUser || authUser.role !== 'admin') {
-    return writeError(c, 403, 'FORBIDDEN', 'forbidden');
-  }
-  let body: any = {};
-  let formData: FormData | null = null;
-  const rawHeader = c.req.header('content-type') || c.req.header('Content-Type') || (c.req.raw && c.req.raw.headers ? c.req.raw.headers.get('content-type') : '') || '';
-  const contentType = String(rawHeader).toLowerCase();
-  if (contentType.includes('multipart/form-data')) {
-    try {
-      formData = await c.req.formData();
-      formData.forEach((val, key) => {
-        if (typeof val === 'string') { body[key] = (val !== '' && !isNaN(Number(val))) ? Number(val) : val; }
-      });
-    } catch (e) {
-      return writeError(c, 400, 'INVALID_MULTIPART', 'failed to parse multipart body');
-    }
-  } else {
-    try {
-      body = await c.req.json();
-    } catch (e) {
-      return writeError(c, 400, 'INVALID_JSON', 'failed to parse json body');
-    }
-  }
-
-  if (body['role'] === 'admin' && (!authUser || authUser.role !== 'admin')) {
-    return writeError(c, 403, 'FORBIDDEN', 'cannot grant admin role');
-  }
-  if (body['sake_record_id'] === undefined || body['sake_record_id'] === null) {
-    return writeError(c, 400, 'VALIDATION_FAILED', 'field sake_record_id is required');
-  }
-  if (body['sake_record_id'] !== undefined && body['sake_record_id'] !== null && typeof body['sake_record_id'] !== 'number') {
-    return writeError(c, 400, 'VALIDATION_FAILED', 'field sake_record_id must be a number');
-  }
-  if (body['tag_id'] === undefined || body['tag_id'] === null) {
-    return writeError(c, 400, 'VALIDATION_FAILED', 'field tag_id is required');
-  }
-  if (body['tag_id'] !== undefined && body['tag_id'] !== null && typeof body['tag_id'] !== 'number') {
-    return writeError(c, 400, 'VALIDATION_FAILED', 'field tag_id must be a number');
-  }
-
-  const now = new Date().toISOString();
-  const insertSql = `INSERT INTO "record_tags" ("sake_record_id", "tag_id", "created_at", "updated_at") VALUES (?, ?, ?, ?) RETURNING *`;
-  let created: any = null;
-  try {
-    created = await c.env.DB.prepare(insertSql).bind(body['sake_record_id'] !== undefined ? body['sake_record_id'] : null, body['tag_id'] !== undefined ? body['tag_id'] : null, now, now).first<any>();
-  } catch (err: any) {
-    const errMsg = String(err?.message || err);
-    if (errMsg.includes('UNIQUE constraint failed') || errMsg.includes('SQLITE_CONSTRAINT')) {
-      return writeError(c, 400, 'INVALID_INPUT', `unique constraint failed: ${errMsg}`);
-    }
-    return writeError(c, 400, 'INVALID_INPUT', errMsg);
-  }
-  return c.json({ data: sanitizeRecord(created, []) }, 201);
-});
-
-// UPDATE /api/record_tags/:id
-app.put('/api/record_tags/:id', async (c) => {
-  const authUser = await getAuthUser(c);
-  if (!authUser) {
-    return writeError(c, 401, 'UNAUTHORIZED', 'authentication required');
-  }
-  const id = c.req.param('id');
-  const existing = await c.env.DB.prepare('SELECT * FROM "record_tags" WHERE id = ?').bind(id).first();
-  if (!existing) {
-    return writeError(c, 404, 'NOT_FOUND', 'record not found');
-  }
-  if (!authUser || authUser.role !== 'admin') {
-    return writeError(c, 403, 'FORBIDDEN', 'forbidden');
-  }
-  let body: any;
-  try {
-    body = await c.req.json();
-  } catch (e) {
-    return writeError(c, 400, 'INVALID_JSON', 'failed to parse json body');
-  }
-
-  if (body['role'] !== undefined && body['role'] !== (existing as any)['role'] && body['role'] === 'admin' && (!authUser || authUser.role !== 'admin')) {
-    return writeError(c, 403, 'FORBIDDEN', 'cannot grant admin role');
-  }
-  const now = new Date().toISOString();
-  const updateSql = `UPDATE "record_tags" SET "sake_record_id" = ?, "tag_id" = ?, "updated_at" = ? WHERE id = ? RETURNING *`;
-  let updated: any = null;
-  try {
-    updated = await c.env.DB.prepare(updateSql).bind(body['sake_record_id'] !== undefined ? body['sake_record_id'] : (existing as any)['sake_record_id'], body['tag_id'] !== undefined ? body['tag_id'] : (existing as any)['tag_id'], now, id).first();
-  } catch (err: any) {
-    const errMsg = String(err?.message || err);
-    if (errMsg.includes('UNIQUE constraint failed') || errMsg.includes('SQLITE_CONSTRAINT')) {
-      return writeError(c, 400, 'INVALID_INPUT', `unique constraint failed: ${errMsg}`);
-    }
-    return writeError(c, 400, 'INVALID_INPUT', errMsg);
-  }
-  if (!updated) {
-    return writeError(c, 404, 'NOT_FOUND', 'record not found');
-  }
-  return c.json({ data: sanitizeRecord(updated, []) });
-});
-
-// DELETE /api/record_tags/:id
-app.delete('/api/record_tags/:id', async (c) => {
-  const authUser = await getAuthUser(c);
-  if (!authUser) {
-    return writeError(c, 401, 'UNAUTHORIZED', 'authentication required');
-  }
-  const id = c.req.param('id');
-  const parsedId = isNaN(Number(id)) ? id : Number(id);
-  const existing = await c.env.DB.prepare('SELECT * FROM "record_tags" WHERE id = ?').bind(id).first();
-  if (!existing) {
-    return writeError(c, 404, 'NOT_FOUND', 'record not found');
-  }
-  if (!authUser || authUser.role !== 'admin') {
-    return writeError(c, 403, 'FORBIDDEN', 'forbidden');
-  }
-  const res = await c.env.DB.prepare('DELETE FROM "record_tags" WHERE id = ?').bind(id).run();
-  if (!res.meta.changes) {
-    return writeError(c, 404, 'NOT_FOUND', 'record not found');
-  }
-  return c.json({ data: { deleted: true, id: parsedId } });
-});
-
-// VIEW LIST /view/record_tags
-app.get('/view/record_tags', async (c) => {
-  const authUser = await getAuthUser(c);
-  const whereConds: string[] = [];
-  const params: any[] = [];
-  const whereClause = whereConds.length > 0 ? ' WHERE ' + whereConds.join(' AND ') : '';
-  const { results } = await c.env.DB.prepare(`SELECT * FROM "record_tags"${whereClause} ORDER BY id ASC`).bind(...params).all();
-  const viewRecs = (results || []) as any[];
-  const incErr = await processIncludes(c, 'record_tags', viewRecs, c.req.query('include'), authUser);
-  if (incErr) return incErr;
-  let html = `<!DOCTYPE html><html><head><title>RecordTag List</title></head><body>`;
-  html += `<h1>RecordTag List</h1>`;
-  html += `<a href="/view/record_tags/new">+ New RecordTag</a><br/><br/><table border="1"><thead><tr><th>id</th>`;
-  html += `<th>sake_record_id</th>`;
-  html += `<th>tag_id</th>`;
-  html += `<th>Actions</th></tr></thead><tbody>`;
-  for (const row of viewRecs) {
-    html += `<tr><td>${(row as any).id}</td>`;
-    html += `<td>${escapeHTML((row as any)['sake_record_id'])}</td>`;
-    html += `<td>${escapeHTML((row as any)['tag_id'])}</td>`;
-    html += `<td><a href="/view/record_tags/${(row as any).id}">Detail</a> <a href="/view/record_tags/${(row as any).id}/edit">Edit</a></td></tr>`;
-  }
-  html += `</tbody></table></body></html>`;
-  return c.html(html);
-});
-
-// VIEW NEW /view/record_tags/new
-app.get('/view/record_tags/new', async (c) => {
-  let html = `<!DOCTYPE html><html><head><title>New RecordTag</title></head><body><h1>New RecordTag</h1><form method="POST" action="/view/record_tags">`;
-  html += `<label>sake_record_id: <input type="number" name="sake_record_id" /></label><br/><br/>`;
-  html += `<label>tag_id: <input type="number" name="tag_id" /></label><br/><br/>`;
-  html += `<button type="submit">Save</button></form></body></html>`;
-  return c.html(html);
-});
-
-// VIEW CREATE SUBMIT /view/record_tags
-app.post('/view/record_tags', async (c) => {
-  const formData = await c.req.formData();
-  const body: any = {};
-  formData.forEach((value, key) => { body[key] = value; });
-  const now = new Date().toISOString();
-  await c.env.DB.prepare(insertSql).bind(body['sake_record_id'] !== undefined ? body['sake_record_id'] : null, body['tag_id'] !== undefined ? body['tag_id'] : null, now, now).run();
-  return c.redirect('/view/record_tags', 303);
-});
-
-// VIEW DETAIL /view/record_tags/:id
-app.get('/view/record_tags/:id', async (c) => {
-  const id = c.req.param('id');
-  const record = await c.env.DB.prepare('SELECT * FROM "record_tags" WHERE id = ?').bind(id).first<any>();
-  if (!record) return c.html('<h1>404 Not Found</h1>', 404);
-  const authUser = await getAuthUser(c);
-  const incErr = await processIncludes(c, 'record_tags', [record], c.req.query('include'), authUser);
-  if (incErr) return incErr;
-  let html = `<!DOCTYPE html><html><head><title>RecordTag Detail</title></head><body><h1>RecordTag #${id}</h1><dl>`;
-  html += `<dt>sake_record_id</dt><dd>${escapeHTML(record['sake_record_id'])}</dd>`;
-  html += `<dt>tag_id</dt><dd>${escapeHTML(record['tag_id'])}</dd>`;
-  html += `</dl></body></html>`;
-  return c.html(html);
-});
 
 // LIST /api/sake_images
 app.get('/api/sake_images', async (c) => {
@@ -1921,6 +1139,788 @@ app.get('/view/sake_records/:id', async (c) => {
   html += `<dt>aroma_intensity</dt><dd>${escapeHTML(record['aroma_intensity'])}</dd>`;
   html += `<dt>acidity</dt><dd>${escapeHTML(record['acidity'])}</dd>`;
   html += `<dt>clean_umami</dt><dd>${escapeHTML(record['clean_umami'])}</dd>`;
+  html += `</dl></body></html>`;
+  return c.html(html);
+});
+
+// LIST /api/tags
+app.get('/api/tags', async (c) => {
+  const authUser = await getAuthUser(c);
+  const limit = Math.min(parseInt(c.req.query('limit') || '20', 10), 100);
+  const offset = Math.max(parseInt(c.req.query('offset') || '0', 10), 0);
+
+  const whereConds: string[] = [];
+  const params: any[] = [];
+  if (!authUser || authUser.role !== 'admin') {
+    if (authUser) {
+      whereConds.push('("owner_id" = ? OR "owner_id" IS NULL)');
+      params.push(authUser.id);
+    } else {
+      whereConds.push('"owner_id" IS NULL');
+    }
+  }
+  const whereClause = whereConds.length > 0 ? ' WHERE ' + whereConds.join(' AND ') : '';
+  const countSql = `SELECT COUNT(*) as total FROM "tags"${whereClause}`;
+  const countStmt = await c.env.DB.prepare(countSql).bind(...params).first<{ total: number }>();
+  const total = countStmt ? countStmt.total : 0;
+  const querySql = `SELECT * FROM "tags"${whereClause} ORDER BY id ASC LIMIT ? OFFSET ?`;
+  const { results } = await c.env.DB.prepare(querySql).bind(...params, limit, offset).all();
+  const sanitized = (results || []).map((r: any) => sanitizeRecord(r, []));
+  const incErr = await processIncludes(c, 'tags', sanitized, c.req.query('include'), authUser);
+  if (incErr) return incErr;
+  return c.json({
+    data: sanitized,
+    meta: { total, limit, offset }
+  });
+});
+
+// DETAIL /api/tags/:id
+app.get('/api/tags/:id', async (c) => {
+  const authUser = await getAuthUser(c);
+  const id = c.req.param('id');
+  const record = await c.env.DB.prepare('SELECT * FROM "tags" WHERE id = ?').bind(id).first();
+  if (!record) {
+    return writeError(c, 404, 'NOT_FOUND', 'record not found');
+  }
+  const ownerVal = (record as any)['owner_id'];
+  if (ownerVal !== null && ownerVal !== undefined) {
+    if (!authUser) {
+      return writeError(c, 401, 'UNAUTHORIZED', 'authentication required');
+    }
+    if (authUser.role !== 'admin' && ownerVal != authUser.id) {
+      return writeError(c, 403, 'FORBIDDEN', 'forbidden');
+    }
+  }
+  const sanitized = sanitizeRecord(record, []);
+  const incErr = await processIncludes(c, 'tags', [sanitized], c.req.query('include'), authUser);
+  if (incErr) return incErr;
+  return c.json({ data: sanitized });
+});
+
+// CREATE /api/tags
+app.post('/api/tags', async (c) => {
+  const authUser = await getAuthUser(c);
+  if (!authUser) {
+    return writeError(c, 401, 'UNAUTHORIZED', 'authentication required');
+  }
+  let body: any = {};
+  let formData: FormData | null = null;
+  const rawHeader = c.req.header('content-type') || c.req.header('Content-Type') || (c.req.raw && c.req.raw.headers ? c.req.raw.headers.get('content-type') : '') || '';
+  const contentType = String(rawHeader).toLowerCase();
+  if (contentType.includes('multipart/form-data')) {
+    try {
+      formData = await c.req.formData();
+      formData.forEach((val, key) => {
+        if (typeof val === 'string') { body[key] = (val !== '' && !isNaN(Number(val))) ? Number(val) : val; }
+      });
+    } catch (e) {
+      return writeError(c, 400, 'INVALID_MULTIPART', 'failed to parse multipart body');
+    }
+  } else {
+    try {
+      body = await c.req.json();
+    } catch (e) {
+      return writeError(c, 400, 'INVALID_JSON', 'failed to parse json body');
+    }
+  }
+
+  if (body['role'] === 'admin' && (!authUser || authUser.role !== 'admin')) {
+    return writeError(c, 403, 'FORBIDDEN', 'cannot grant admin role');
+  }
+  if (authUser) {
+    body['owner_id'] = authUser.id;
+  } else {
+    delete body['owner_id'];
+  }
+  if (body['legacy_id'] !== undefined && body['legacy_id'] !== null && typeof body['legacy_id'] !== 'string') {
+    return writeError(c, 400, 'VALIDATION_FAILED', 'field legacy_id must be a string');
+  }
+  if (body['owner_id'] !== undefined && body['owner_id'] !== null && typeof body['owner_id'] !== 'number') {
+    return writeError(c, 400, 'VALIDATION_FAILED', 'field owner_id must be a number');
+  }
+  if (body['drink_type'] !== undefined && body['drink_type'] !== null && typeof body['drink_type'] !== 'string') {
+    return writeError(c, 400, 'VALIDATION_FAILED', 'field drink_type must be a string');
+  }
+  if (body['tag_group'] === undefined || body['tag_group'] === null) {
+    return writeError(c, 400, 'VALIDATION_FAILED', 'field tag_group is required');
+  }
+  if (body['label'] === undefined || body['label'] === null) {
+    return writeError(c, 400, 'VALIDATION_FAILED', 'field label is required');
+  }
+  if (body['label'] !== undefined && body['label'] !== null && typeof body['label'] !== 'string') {
+    return writeError(c, 400, 'VALIDATION_FAILED', 'field label must be a string');
+  }
+  if (body['is_default'] !== undefined && body['is_default'] !== null && typeof body['is_default'] !== 'boolean') {
+    return writeError(c, 400, 'VALIDATION_FAILED', 'field is_default must be a boolean');
+  }
+
+  const now = new Date().toISOString();
+  const insertSql = `INSERT INTO "tags" ("legacy_id", "owner_id", "drink_type", "tag_group", "label", "is_default", "created_at", "updated_at") VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`;
+  let created: any = null;
+  try {
+    created = await c.env.DB.prepare(insertSql).bind(body['legacy_id'] !== undefined ? body['legacy_id'] : null, body['owner_id'] !== undefined ? body['owner_id'] : null, body['drink_type'] !== undefined ? body['drink_type'] : 'sake', body['tag_group'] !== undefined ? body['tag_group'] : null, body['label'] !== undefined ? body['label'] : null, body['is_default'] !== undefined ? (body['is_default'] ? 1 : 0) : false, now, now).first<any>();
+  } catch (err: any) {
+    const errMsg = String(err?.message || err);
+    if (errMsg.includes('UNIQUE constraint failed') || errMsg.includes('SQLITE_CONSTRAINT')) {
+      return writeError(c, 400, 'INVALID_INPUT', `unique constraint failed: ${errMsg}`);
+    }
+    return writeError(c, 400, 'INVALID_INPUT', errMsg);
+  }
+  return c.json({ data: sanitizeRecord(created, []) }, 201);
+});
+
+// UPDATE /api/tags/:id
+app.put('/api/tags/:id', async (c) => {
+  const authUser = await getAuthUser(c);
+  if (!authUser) {
+    return writeError(c, 401, 'UNAUTHORIZED', 'authentication required');
+  }
+  const id = c.req.param('id');
+  const existing = await c.env.DB.prepare('SELECT * FROM "tags" WHERE id = ?').bind(id).first();
+  if (!existing) {
+    return writeError(c, 404, 'NOT_FOUND', 'record not found');
+  }
+  const ownerVal = (existing as any)['owner_id'];
+  if (ownerVal === null || ownerVal === undefined) {
+    if (authUser.role !== 'admin') {
+      return writeError(c, 403, 'FORBIDDEN', 'forbidden');
+    }
+  } else if (authUser.role !== 'admin' && ownerVal != authUser.id) {
+    return writeError(c, 403, 'FORBIDDEN', 'forbidden');
+  }
+  let body: any;
+  try {
+    body = await c.req.json();
+  } catch (e) {
+    return writeError(c, 400, 'INVALID_JSON', 'failed to parse json body');
+  }
+
+  if (body['role'] !== undefined && body['role'] !== (existing as any)['role'] && body['role'] === 'admin' && (!authUser || authUser.role !== 'admin')) {
+    return writeError(c, 403, 'FORBIDDEN', 'cannot grant admin role');
+  }
+  const now = new Date().toISOString();
+  const updateSql = `UPDATE "tags" SET "legacy_id" = ?, "owner_id" = ?, "drink_type" = ?, "tag_group" = ?, "label" = ?, "is_default" = ?, "updated_at" = ? WHERE id = ? RETURNING *`;
+  let updated: any = null;
+  try {
+    updated = await c.env.DB.prepare(updateSql).bind(body['legacy_id'] !== undefined ? body['legacy_id'] : (existing as any)['legacy_id'], body['owner_id'] !== undefined ? body['owner_id'] : (existing as any)['owner_id'], body['drink_type'] !== undefined ? body['drink_type'] : (existing as any)['drink_type'], body['tag_group'] !== undefined ? body['tag_group'] : (existing as any)['tag_group'], body['label'] !== undefined ? body['label'] : (existing as any)['label'], body['is_default'] !== undefined ? body['is_default'] : (existing as any)['is_default'], now, id).first();
+  } catch (err: any) {
+    const errMsg = String(err?.message || err);
+    if (errMsg.includes('UNIQUE constraint failed') || errMsg.includes('SQLITE_CONSTRAINT')) {
+      return writeError(c, 400, 'INVALID_INPUT', `unique constraint failed: ${errMsg}`);
+    }
+    return writeError(c, 400, 'INVALID_INPUT', errMsg);
+  }
+  if (!updated) {
+    return writeError(c, 404, 'NOT_FOUND', 'record not found');
+  }
+  return c.json({ data: sanitizeRecord(updated, []) });
+});
+
+// DELETE /api/tags/:id
+app.delete('/api/tags/:id', async (c) => {
+  const authUser = await getAuthUser(c);
+  if (!authUser) {
+    return writeError(c, 401, 'UNAUTHORIZED', 'authentication required');
+  }
+  const id = c.req.param('id');
+  const parsedId = isNaN(Number(id)) ? id : Number(id);
+  const existing = await c.env.DB.prepare('SELECT * FROM "tags" WHERE id = ?').bind(id).first();
+  if (!existing) {
+    return writeError(c, 404, 'NOT_FOUND', 'record not found');
+  }
+  const ownerVal = (existing as any)['owner_id'];
+  if (ownerVal === null || ownerVal === undefined) {
+    if (authUser.role !== 'admin') {
+      return writeError(c, 403, 'FORBIDDEN', 'forbidden');
+    }
+  } else if (authUser.role !== 'admin' && ownerVal != authUser.id) {
+    return writeError(c, 403, 'FORBIDDEN', 'forbidden');
+  }
+  const res = await c.env.DB.prepare('DELETE FROM "tags" WHERE id = ?').bind(id).run();
+  if (!res.meta.changes) {
+    return writeError(c, 404, 'NOT_FOUND', 'record not found');
+  }
+  return c.json({ data: { deleted: true, id: parsedId } });
+});
+
+// VIEW LIST /view/tags
+app.get('/view/tags', async (c) => {
+  const authUser = await getAuthUser(c);
+  const whereConds: string[] = [];
+  const params: any[] = [];
+  if (!authUser || authUser.role !== 'admin') {
+    if (authUser) {
+      whereConds.push('("owner_id" = ? OR "owner_id" IS NULL)');
+      params.push(authUser.id);
+    } else {
+      whereConds.push('"owner_id" IS NULL');
+    }
+  }
+  const whereClause = whereConds.length > 0 ? ' WHERE ' + whereConds.join(' AND ') : '';
+  const { results } = await c.env.DB.prepare(`SELECT * FROM "tags"${whereClause} ORDER BY id ASC`).bind(...params).all();
+  const viewRecs = (results || []) as any[];
+  const incErr = await processIncludes(c, 'tags', viewRecs, c.req.query('include'), authUser);
+  if (incErr) return incErr;
+  let html = `<!DOCTYPE html><html><head><title>Tag List</title></head><body>`;
+  html += `<h1>Tag List</h1>`;
+  html += `<a href="/view/tags/new">+ New Tag</a><br/><br/><table border="1"><thead><tr><th>id</th>`;
+  html += `<th>legacy_id</th>`;
+  html += `<th>owner_id</th>`;
+  html += `<th>drink_type</th>`;
+  html += `<th>tag_group</th>`;
+  html += `<th>label</th>`;
+  html += `<th>is_default</th>`;
+  html += `<th>Actions</th></tr></thead><tbody>`;
+  for (const row of viewRecs) {
+    html += `<tr><td>${(row as any).id}</td>`;
+    html += `<td>${escapeHTML((row as any)['legacy_id'])}</td>`;
+    html += `<td>${escapeHTML((row as any)['owner_id'])}</td>`;
+    html += `<td>${escapeHTML((row as any)['drink_type'])}</td>`;
+    html += `<td>${escapeHTML((row as any)['tag_group'])}</td>`;
+    html += `<td>${escapeHTML((row as any)['label'])}</td>`;
+    html += `<td>${escapeHTML((row as any)['is_default'])}</td>`;
+    html += `<td><a href="/view/tags/${(row as any).id}">Detail</a> <a href="/view/tags/${(row as any).id}/edit">Edit</a></td></tr>`;
+  }
+  html += `</tbody></table></body></html>`;
+  return c.html(html);
+});
+
+// VIEW NEW /view/tags/new
+app.get('/view/tags/new', async (c) => {
+  let html = `<!DOCTYPE html><html><head><title>New Tag</title></head><body><h1>New Tag</h1><form method="POST" action="/view/tags">`;
+  html += `<label>legacy_id: <input type="text" name="legacy_id" /></label><br/><br/>`;
+  html += `<label>owner_id: <input type="number" name="owner_id" /></label><br/><br/>`;
+  html += `<label>drink_type: <input type="text" name="drink_type" /></label><br/><br/>`;
+  html += `<label>tag_group: <input type="text" name="tag_group" /></label><br/><br/>`;
+  html += `<label>label: <input type="text" name="label" /></label><br/><br/>`;
+  html += `<label>is_default: <input type="text" name="is_default" /></label><br/><br/>`;
+  html += `<button type="submit">Save</button></form></body></html>`;
+  return c.html(html);
+});
+
+// VIEW CREATE SUBMIT /view/tags
+app.post('/view/tags', async (c) => {
+  const formData = await c.req.formData();
+  const body: any = {};
+  formData.forEach((value, key) => { body[key] = value; });
+  const now = new Date().toISOString();
+  await c.env.DB.prepare(insertSql).bind(body['legacy_id'] !== undefined ? body['legacy_id'] : null, body['owner_id'] !== undefined ? body['owner_id'] : null, body['drink_type'] !== undefined ? body['drink_type'] : 'sake', body['tag_group'] !== undefined ? body['tag_group'] : null, body['label'] !== undefined ? body['label'] : null, body['is_default'] !== undefined ? (body['is_default'] ? 1 : 0) : false, now, now).run();
+  return c.redirect('/view/tags', 303);
+});
+
+// VIEW DETAIL /view/tags/:id
+app.get('/view/tags/:id', async (c) => {
+  const id = c.req.param('id');
+  const record = await c.env.DB.prepare('SELECT * FROM "tags" WHERE id = ?').bind(id).first<any>();
+  if (!record) return c.html('<h1>404 Not Found</h1>', 404);
+  const authUser = await getAuthUser(c);
+  const incErr = await processIncludes(c, 'tags', [record], c.req.query('include'), authUser);
+  if (incErr) return incErr;
+  let html = `<!DOCTYPE html><html><head><title>Tag Detail</title></head><body><h1>Tag #${id}</h1><dl>`;
+  html += `<dt>legacy_id</dt><dd>${escapeHTML(record['legacy_id'])}</dd>`;
+  html += `<dt>owner_id</dt><dd>${escapeHTML(record['owner_id'])}</dd>`;
+  html += `<dt>drink_type</dt><dd>${escapeHTML(record['drink_type'])}</dd>`;
+  html += `<dt>tag_group</dt><dd>${escapeHTML(record['tag_group'])}</dd>`;
+  html += `<dt>label</dt><dd>${escapeHTML(record['label'])}</dd>`;
+  html += `<dt>is_default</dt><dd>${escapeHTML(record['is_default'])}</dd>`;
+  html += `</dl></body></html>`;
+  return c.html(html);
+});
+
+// LIST /api/users
+app.get('/api/users', async (c) => {
+  const authUser = await getAuthUser(c);
+  if (!authUser) {
+    return writeError(c, 401, 'UNAUTHORIZED', 'authentication required');
+  }
+  const limit = Math.min(parseInt(c.req.query('limit') || '20', 10), 100);
+  const offset = Math.max(parseInt(c.req.query('offset') || '0', 10), 0);
+
+  const whereConds: string[] = [];
+  const params: any[] = [];
+  const whereClause = whereConds.length > 0 ? ' WHERE ' + whereConds.join(' AND ') : '';
+  const countSql = `SELECT COUNT(*) as total FROM "users"${whereClause}`;
+  const countStmt = await c.env.DB.prepare(countSql).bind(...params).first<{ total: number }>();
+  const total = countStmt ? countStmt.total : 0;
+  const querySql = `SELECT * FROM "users"${whereClause} ORDER BY id ASC LIMIT ? OFFSET ?`;
+  const { results } = await c.env.DB.prepare(querySql).bind(...params, limit, offset).all();
+  const sanitized = (results || []).map((r: any) => sanitizeRecord(r, []));
+  const incErr = await processIncludes(c, 'users', sanitized, c.req.query('include'), authUser);
+  if (incErr) return incErr;
+  return c.json({
+    data: sanitized,
+    meta: { total, limit, offset }
+  });
+});
+
+// DETAIL /api/users/:id
+app.get('/api/users/:id', async (c) => {
+  const authUser = await getAuthUser(c);
+  if (!authUser) {
+    return writeError(c, 401, 'UNAUTHORIZED', 'authentication required');
+  }
+  const id = c.req.param('id');
+  const record = await c.env.DB.prepare('SELECT * FROM "users" WHERE id = ?').bind(id).first();
+  if (!record) {
+    return writeError(c, 404, 'NOT_FOUND', 'record not found');
+  }
+  const sanitized = sanitizeRecord(record, []);
+  const incErr = await processIncludes(c, 'users', [sanitized], c.req.query('include'), authUser);
+  if (incErr) return incErr;
+  return c.json({ data: sanitized });
+});
+
+// CREATE /api/users
+app.post('/api/users', async (c) => {
+  const authUser = await getAuthUser(c);
+  let body: any = {};
+  let formData: FormData | null = null;
+  const rawHeader = c.req.header('content-type') || c.req.header('Content-Type') || (c.req.raw && c.req.raw.headers ? c.req.raw.headers.get('content-type') : '') || '';
+  const contentType = String(rawHeader).toLowerCase();
+  if (contentType.includes('multipart/form-data')) {
+    try {
+      formData = await c.req.formData();
+      formData.forEach((val, key) => {
+        if (typeof val === 'string') { body[key] = (val !== '' && !isNaN(Number(val))) ? Number(val) : val; }
+      });
+    } catch (e) {
+      return writeError(c, 400, 'INVALID_MULTIPART', 'failed to parse multipart body');
+    }
+  } else {
+    try {
+      body = await c.req.json();
+    } catch (e) {
+      return writeError(c, 400, 'INVALID_JSON', 'failed to parse json body');
+    }
+  }
+
+  if (body['role'] === 'admin' && (!authUser || authUser.role !== 'admin')) {
+    return writeError(c, 403, 'FORBIDDEN', 'cannot grant admin role');
+  }
+  if (body['legacy_id'] !== undefined && body['legacy_id'] !== null && typeof body['legacy_id'] !== 'string') {
+    return writeError(c, 400, 'VALIDATION_FAILED', 'field legacy_id must be a string');
+  }
+  if (body['provider'] === undefined || body['provider'] === null) {
+    return writeError(c, 400, 'VALIDATION_FAILED', 'field provider is required');
+  }
+  if (body['provider'] !== undefined && body['provider'] !== null && typeof body['provider'] !== 'string') {
+    return writeError(c, 400, 'VALIDATION_FAILED', 'field provider must be a string');
+  }
+  if (body['provider_user_id'] === undefined || body['provider_user_id'] === null) {
+    return writeError(c, 400, 'VALIDATION_FAILED', 'field provider_user_id is required');
+  }
+  if (body['provider_user_id'] !== undefined && body['provider_user_id'] !== null && typeof body['provider_user_id'] !== 'string') {
+    return writeError(c, 400, 'VALIDATION_FAILED', 'field provider_user_id must be a string');
+  }
+  if (body['email'] !== undefined && body['email'] !== null && typeof body['email'] !== 'string') {
+    return writeError(c, 400, 'VALIDATION_FAILED', 'field email must be a string');
+  }
+  if (body['display_name'] !== undefined && body['display_name'] !== null && typeof body['display_name'] !== 'string') {
+    return writeError(c, 400, 'VALIDATION_FAILED', 'field display_name must be a string');
+  }
+  if (body['avatar_url'] !== undefined && body['avatar_url'] !== null && typeof body['avatar_url'] !== 'string') {
+    return writeError(c, 400, 'VALIDATION_FAILED', 'field avatar_url must be a string');
+  }
+
+  const now = new Date().toISOString();
+  const insertSql = `INSERT INTO "users" ("legacy_id", "provider", "provider_user_id", "email", "display_name", "avatar_url", "last_login_at", "created_at", "updated_at") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`;
+  let created: any = null;
+  try {
+    created = await c.env.DB.prepare(insertSql).bind(body['legacy_id'] !== undefined ? body['legacy_id'] : null, body['provider'] !== undefined ? body['provider'] : null, body['provider_user_id'] !== undefined ? body['provider_user_id'] : null, body['email'] !== undefined ? body['email'] : null, body['display_name'] !== undefined ? body['display_name'] : null, body['avatar_url'] !== undefined ? body['avatar_url'] : null, body['last_login_at'] !== undefined ? body['last_login_at'] : null, now, now).first<any>();
+  } catch (err: any) {
+    const errMsg = String(err?.message || err);
+    if (errMsg.includes('UNIQUE constraint failed') || errMsg.includes('SQLITE_CONSTRAINT')) {
+      return writeError(c, 400, 'INVALID_INPUT', `unique constraint failed: ${errMsg}`);
+    }
+    return writeError(c, 400, 'INVALID_INPUT', errMsg);
+  }
+  return c.json({ data: sanitizeRecord(created, []) }, 201);
+});
+
+// UPDATE /api/users/:id
+app.put('/api/users/:id', async (c) => {
+  const authUser = await getAuthUser(c);
+  if (!authUser) {
+    return writeError(c, 401, 'UNAUTHORIZED', 'authentication required');
+  }
+  const id = c.req.param('id');
+  const existing = await c.env.DB.prepare('SELECT * FROM "users" WHERE id = ?').bind(id).first();
+  if (!existing) {
+    return writeError(c, 404, 'NOT_FOUND', 'record not found');
+  }
+  const ownerVal = (existing as any)['id'];
+  if (ownerVal === null || ownerVal === undefined) {
+    if (authUser.role !== 'admin') {
+      return writeError(c, 403, 'FORBIDDEN', 'forbidden');
+    }
+  } else if (authUser.role !== 'admin' && ownerVal != authUser.id) {
+    return writeError(c, 403, 'FORBIDDEN', 'forbidden');
+  }
+  let body: any;
+  try {
+    body = await c.req.json();
+  } catch (e) {
+    return writeError(c, 400, 'INVALID_JSON', 'failed to parse json body');
+  }
+
+  if (body['role'] !== undefined && body['role'] !== (existing as any)['role'] && body['role'] === 'admin' && (!authUser || authUser.role !== 'admin')) {
+    return writeError(c, 403, 'FORBIDDEN', 'cannot grant admin role');
+  }
+  const now = new Date().toISOString();
+  const updateSql = `UPDATE "users" SET "legacy_id" = ?, "provider" = ?, "provider_user_id" = ?, "email" = ?, "display_name" = ?, "avatar_url" = ?, "last_login_at" = ?, "updated_at" = ? WHERE id = ? RETURNING *`;
+  let updated: any = null;
+  try {
+    updated = await c.env.DB.prepare(updateSql).bind(body['legacy_id'] !== undefined ? body['legacy_id'] : (existing as any)['legacy_id'], body['provider'] !== undefined ? body['provider'] : (existing as any)['provider'], body['provider_user_id'] !== undefined ? body['provider_user_id'] : (existing as any)['provider_user_id'], body['email'] !== undefined ? body['email'] : (existing as any)['email'], body['display_name'] !== undefined ? body['display_name'] : (existing as any)['display_name'], body['avatar_url'] !== undefined ? body['avatar_url'] : (existing as any)['avatar_url'], body['last_login_at'] !== undefined ? body['last_login_at'] : (existing as any)['last_login_at'], now, id).first();
+  } catch (err: any) {
+    const errMsg = String(err?.message || err);
+    if (errMsg.includes('UNIQUE constraint failed') || errMsg.includes('SQLITE_CONSTRAINT')) {
+      return writeError(c, 400, 'INVALID_INPUT', `unique constraint failed: ${errMsg}`);
+    }
+    return writeError(c, 400, 'INVALID_INPUT', errMsg);
+  }
+  if (!updated) {
+    return writeError(c, 404, 'NOT_FOUND', 'record not found');
+  }
+  return c.json({ data: sanitizeRecord(updated, []) });
+});
+
+// DELETE /api/users/:id
+app.delete('/api/users/:id', async (c) => {
+  const authUser = await getAuthUser(c);
+  if (!authUser) {
+    return writeError(c, 401, 'UNAUTHORIZED', 'authentication required');
+  }
+  const id = c.req.param('id');
+  const parsedId = isNaN(Number(id)) ? id : Number(id);
+  const existing = await c.env.DB.prepare('SELECT * FROM "users" WHERE id = ?').bind(id).first();
+  if (!existing) {
+    return writeError(c, 404, 'NOT_FOUND', 'record not found');
+  }
+  const ownerVal = (existing as any)['id'];
+  if (ownerVal === null || ownerVal === undefined) {
+    if (authUser.role !== 'admin') {
+      return writeError(c, 403, 'FORBIDDEN', 'forbidden');
+    }
+  } else if (authUser.role !== 'admin' && ownerVal != authUser.id) {
+    return writeError(c, 403, 'FORBIDDEN', 'forbidden');
+  }
+  const res = await c.env.DB.prepare('DELETE FROM "users" WHERE id = ?').bind(id).run();
+  if (!res.meta.changes) {
+    return writeError(c, 404, 'NOT_FOUND', 'record not found');
+  }
+  return c.json({ data: { deleted: true, id: parsedId } });
+});
+
+// VIEW LIST /view/users
+app.get('/view/users', async (c) => {
+  const authUser = await getAuthUser(c);
+  const whereConds: string[] = [];
+  const params: any[] = [];
+  const whereClause = whereConds.length > 0 ? ' WHERE ' + whereConds.join(' AND ') : '';
+  const { results } = await c.env.DB.prepare(`SELECT * FROM "users"${whereClause} ORDER BY id ASC`).bind(...params).all();
+  const viewRecs = (results || []) as any[];
+  const incErr = await processIncludes(c, 'users', viewRecs, c.req.query('include'), authUser);
+  if (incErr) return incErr;
+  let html = `<!DOCTYPE html><html><head><title>User List</title></head><body>`;
+  html += `<h1>User List</h1>`;
+  html += `<a href="/view/users/new">+ New User</a><br/><br/><table border="1"><thead><tr><th>id</th>`;
+  html += `<th>legacy_id</th>`;
+  html += `<th>provider</th>`;
+  html += `<th>provider_user_id</th>`;
+  html += `<th>email</th>`;
+  html += `<th>display_name</th>`;
+  html += `<th>avatar_url</th>`;
+  html += `<th>last_login_at</th>`;
+  html += `<th>Actions</th></tr></thead><tbody>`;
+  for (const row of viewRecs) {
+    html += `<tr><td>${(row as any).id}</td>`;
+    html += `<td>${escapeHTML((row as any)['legacy_id'])}</td>`;
+    html += `<td>${escapeHTML((row as any)['provider'])}</td>`;
+    html += `<td>${escapeHTML((row as any)['provider_user_id'])}</td>`;
+    html += `<td>${escapeHTML((row as any)['email'])}</td>`;
+    html += `<td>${escapeHTML((row as any)['display_name'])}</td>`;
+    html += `<td>${escapeHTML((row as any)['avatar_url'])}</td>`;
+    html += `<td>${escapeHTML((row as any)['last_login_at'])}</td>`;
+    html += `<td><a href="/view/users/${(row as any).id}">Detail</a> <a href="/view/users/${(row as any).id}/edit">Edit</a></td></tr>`;
+  }
+  html += `</tbody></table></body></html>`;
+  return c.html(html);
+});
+
+// VIEW NEW /view/users/new
+app.get('/view/users/new', async (c) => {
+  let html = `<!DOCTYPE html><html><head><title>New User</title></head><body><h1>New User</h1><form method="POST" action="/view/users">`;
+  html += `<label>legacy_id: <input type="text" name="legacy_id" /></label><br/><br/>`;
+  html += `<label>provider: <input type="text" name="provider" /></label><br/><br/>`;
+  html += `<label>provider_user_id: <input type="text" name="provider_user_id" /></label><br/><br/>`;
+  html += `<label>email: <input type="text" name="email" /></label><br/><br/>`;
+  html += `<label>display_name: <input type="text" name="display_name" /></label><br/><br/>`;
+  html += `<label>avatar_url: <input type="text" name="avatar_url" /></label><br/><br/>`;
+  html += `<label>last_login_at: <input type="text" name="last_login_at" /></label><br/><br/>`;
+  html += `<button type="submit">Save</button></form></body></html>`;
+  return c.html(html);
+});
+
+// VIEW CREATE SUBMIT /view/users
+app.post('/view/users', async (c) => {
+  const formData = await c.req.formData();
+  const body: any = {};
+  formData.forEach((value, key) => { body[key] = value; });
+  const now = new Date().toISOString();
+  await c.env.DB.prepare(insertSql).bind(body['legacy_id'] !== undefined ? body['legacy_id'] : null, body['provider'] !== undefined ? body['provider'] : null, body['provider_user_id'] !== undefined ? body['provider_user_id'] : null, body['email'] !== undefined ? body['email'] : null, body['display_name'] !== undefined ? body['display_name'] : null, body['avatar_url'] !== undefined ? body['avatar_url'] : null, body['last_login_at'] !== undefined ? body['last_login_at'] : null, now, now).run();
+  return c.redirect('/view/users', 303);
+});
+
+// VIEW DETAIL /view/users/:id
+app.get('/view/users/:id', async (c) => {
+  const id = c.req.param('id');
+  const record = await c.env.DB.prepare('SELECT * FROM "users" WHERE id = ?').bind(id).first<any>();
+  if (!record) return c.html('<h1>404 Not Found</h1>', 404);
+  const authUser = await getAuthUser(c);
+  const incErr = await processIncludes(c, 'users', [record], c.req.query('include'), authUser);
+  if (incErr) return incErr;
+  let html = `<!DOCTYPE html><html><head><title>User Detail</title></head><body><h1>User #${id}</h1><dl>`;
+  html += `<dt>legacy_id</dt><dd>${escapeHTML(record['legacy_id'])}</dd>`;
+  html += `<dt>provider</dt><dd>${escapeHTML(record['provider'])}</dd>`;
+  html += `<dt>provider_user_id</dt><dd>${escapeHTML(record['provider_user_id'])}</dd>`;
+  html += `<dt>email</dt><dd>${escapeHTML(record['email'])}</dd>`;
+  html += `<dt>display_name</dt><dd>${escapeHTML(record['display_name'])}</dd>`;
+  html += `<dt>avatar_url</dt><dd>${escapeHTML(record['avatar_url'])}</dd>`;
+  html += `<dt>last_login_at</dt><dd>${escapeHTML(record['last_login_at'])}</dd>`;
+  html += `</dl></body></html>`;
+  return c.html(html);
+});
+
+// LIST /api/record_tags
+app.get('/api/record_tags', async (c) => {
+  const authUser = await getAuthUser(c);
+  if (!authUser) {
+    return writeError(c, 401, 'UNAUTHORIZED', 'authentication required');
+  }
+  if (authUser.role !== 'admin') {
+    return writeError(c, 403, 'FORBIDDEN', 'forbidden');
+  }
+  const limit = Math.min(parseInt(c.req.query('limit') || '20', 10), 100);
+  const offset = Math.max(parseInt(c.req.query('offset') || '0', 10), 0);
+
+  const whereConds: string[] = [];
+  const params: any[] = [];
+  const whereClause = whereConds.length > 0 ? ' WHERE ' + whereConds.join(' AND ') : '';
+  const countSql = `SELECT COUNT(*) as total FROM "record_tags"${whereClause}`;
+  const countStmt = await c.env.DB.prepare(countSql).bind(...params).first<{ total: number }>();
+  const total = countStmt ? countStmt.total : 0;
+  const querySql = `SELECT * FROM "record_tags"${whereClause} ORDER BY id ASC LIMIT ? OFFSET ?`;
+  const { results } = await c.env.DB.prepare(querySql).bind(...params, limit, offset).all();
+  const sanitized = (results || []).map((r: any) => sanitizeRecord(r, []));
+  const incErr = await processIncludes(c, 'record_tags', sanitized, c.req.query('include'), authUser);
+  if (incErr) return incErr;
+  return c.json({
+    data: sanitized,
+    meta: { total, limit, offset }
+  });
+});
+
+// DETAIL /api/record_tags/:id
+app.get('/api/record_tags/:id', async (c) => {
+  const authUser = await getAuthUser(c);
+  if (!authUser) {
+    return writeError(c, 401, 'UNAUTHORIZED', 'authentication required');
+  }
+  const id = c.req.param('id');
+  const record = await c.env.DB.prepare('SELECT * FROM "record_tags" WHERE id = ?').bind(id).first();
+  if (!record) {
+    return writeError(c, 404, 'NOT_FOUND', 'record not found');
+  }
+  if (!authUser || (authUser.role !== 'admin' && authUser.role !== 'admin')) {
+    return writeError(c, 403, 'FORBIDDEN', 'forbidden');
+  }
+  const sanitized = sanitizeRecord(record, []);
+  const incErr = await processIncludes(c, 'record_tags', [sanitized], c.req.query('include'), authUser);
+  if (incErr) return incErr;
+  return c.json({ data: sanitized });
+});
+
+// CREATE /api/record_tags
+app.post('/api/record_tags', async (c) => {
+  const authUser = await getAuthUser(c);
+  if (!authUser) {
+    return writeError(c, 401, 'UNAUTHORIZED', 'authentication required');
+  }
+  if (!authUser || authUser.role !== 'admin') {
+    return writeError(c, 403, 'FORBIDDEN', 'forbidden');
+  }
+  let body: any = {};
+  let formData: FormData | null = null;
+  const rawHeader = c.req.header('content-type') || c.req.header('Content-Type') || (c.req.raw && c.req.raw.headers ? c.req.raw.headers.get('content-type') : '') || '';
+  const contentType = String(rawHeader).toLowerCase();
+  if (contentType.includes('multipart/form-data')) {
+    try {
+      formData = await c.req.formData();
+      formData.forEach((val, key) => {
+        if (typeof val === 'string') { body[key] = (val !== '' && !isNaN(Number(val))) ? Number(val) : val; }
+      });
+    } catch (e) {
+      return writeError(c, 400, 'INVALID_MULTIPART', 'failed to parse multipart body');
+    }
+  } else {
+    try {
+      body = await c.req.json();
+    } catch (e) {
+      return writeError(c, 400, 'INVALID_JSON', 'failed to parse json body');
+    }
+  }
+
+  if (body['role'] === 'admin' && (!authUser || authUser.role !== 'admin')) {
+    return writeError(c, 403, 'FORBIDDEN', 'cannot grant admin role');
+  }
+  if (body['sake_record_id'] === undefined || body['sake_record_id'] === null) {
+    return writeError(c, 400, 'VALIDATION_FAILED', 'field sake_record_id is required');
+  }
+  if (body['sake_record_id'] !== undefined && body['sake_record_id'] !== null && typeof body['sake_record_id'] !== 'number') {
+    return writeError(c, 400, 'VALIDATION_FAILED', 'field sake_record_id must be a number');
+  }
+  if (body['tag_id'] === undefined || body['tag_id'] === null) {
+    return writeError(c, 400, 'VALIDATION_FAILED', 'field tag_id is required');
+  }
+  if (body['tag_id'] !== undefined && body['tag_id'] !== null && typeof body['tag_id'] !== 'number') {
+    return writeError(c, 400, 'VALIDATION_FAILED', 'field tag_id must be a number');
+  }
+
+  const now = new Date().toISOString();
+  const insertSql = `INSERT INTO "record_tags" ("sake_record_id", "tag_id", "created_at", "updated_at") VALUES (?, ?, ?, ?) RETURNING *`;
+  let created: any = null;
+  try {
+    created = await c.env.DB.prepare(insertSql).bind(body['sake_record_id'] !== undefined ? body['sake_record_id'] : null, body['tag_id'] !== undefined ? body['tag_id'] : null, now, now).first<any>();
+  } catch (err: any) {
+    const errMsg = String(err?.message || err);
+    if (errMsg.includes('UNIQUE constraint failed') || errMsg.includes('SQLITE_CONSTRAINT')) {
+      return writeError(c, 400, 'INVALID_INPUT', `unique constraint failed: ${errMsg}`);
+    }
+    return writeError(c, 400, 'INVALID_INPUT', errMsg);
+  }
+  return c.json({ data: sanitizeRecord(created, []) }, 201);
+});
+
+// UPDATE /api/record_tags/:id
+app.put('/api/record_tags/:id', async (c) => {
+  const authUser = await getAuthUser(c);
+  if (!authUser) {
+    return writeError(c, 401, 'UNAUTHORIZED', 'authentication required');
+  }
+  const id = c.req.param('id');
+  const existing = await c.env.DB.prepare('SELECT * FROM "record_tags" WHERE id = ?').bind(id).first();
+  if (!existing) {
+    return writeError(c, 404, 'NOT_FOUND', 'record not found');
+  }
+  if (!authUser || authUser.role !== 'admin') {
+    return writeError(c, 403, 'FORBIDDEN', 'forbidden');
+  }
+  let body: any;
+  try {
+    body = await c.req.json();
+  } catch (e) {
+    return writeError(c, 400, 'INVALID_JSON', 'failed to parse json body');
+  }
+
+  if (body['role'] !== undefined && body['role'] !== (existing as any)['role'] && body['role'] === 'admin' && (!authUser || authUser.role !== 'admin')) {
+    return writeError(c, 403, 'FORBIDDEN', 'cannot grant admin role');
+  }
+  const now = new Date().toISOString();
+  const updateSql = `UPDATE "record_tags" SET "sake_record_id" = ?, "tag_id" = ?, "updated_at" = ? WHERE id = ? RETURNING *`;
+  let updated: any = null;
+  try {
+    updated = await c.env.DB.prepare(updateSql).bind(body['sake_record_id'] !== undefined ? body['sake_record_id'] : (existing as any)['sake_record_id'], body['tag_id'] !== undefined ? body['tag_id'] : (existing as any)['tag_id'], now, id).first();
+  } catch (err: any) {
+    const errMsg = String(err?.message || err);
+    if (errMsg.includes('UNIQUE constraint failed') || errMsg.includes('SQLITE_CONSTRAINT')) {
+      return writeError(c, 400, 'INVALID_INPUT', `unique constraint failed: ${errMsg}`);
+    }
+    return writeError(c, 400, 'INVALID_INPUT', errMsg);
+  }
+  if (!updated) {
+    return writeError(c, 404, 'NOT_FOUND', 'record not found');
+  }
+  return c.json({ data: sanitizeRecord(updated, []) });
+});
+
+// DELETE /api/record_tags/:id
+app.delete('/api/record_tags/:id', async (c) => {
+  const authUser = await getAuthUser(c);
+  if (!authUser) {
+    return writeError(c, 401, 'UNAUTHORIZED', 'authentication required');
+  }
+  const id = c.req.param('id');
+  const parsedId = isNaN(Number(id)) ? id : Number(id);
+  const existing = await c.env.DB.prepare('SELECT * FROM "record_tags" WHERE id = ?').bind(id).first();
+  if (!existing) {
+    return writeError(c, 404, 'NOT_FOUND', 'record not found');
+  }
+  if (!authUser || authUser.role !== 'admin') {
+    return writeError(c, 403, 'FORBIDDEN', 'forbidden');
+  }
+  const res = await c.env.DB.prepare('DELETE FROM "record_tags" WHERE id = ?').bind(id).run();
+  if (!res.meta.changes) {
+    return writeError(c, 404, 'NOT_FOUND', 'record not found');
+  }
+  return c.json({ data: { deleted: true, id: parsedId } });
+});
+
+// VIEW LIST /view/record_tags
+app.get('/view/record_tags', async (c) => {
+  const authUser = await getAuthUser(c);
+  const whereConds: string[] = [];
+  const params: any[] = [];
+  const whereClause = whereConds.length > 0 ? ' WHERE ' + whereConds.join(' AND ') : '';
+  const { results } = await c.env.DB.prepare(`SELECT * FROM "record_tags"${whereClause} ORDER BY id ASC`).bind(...params).all();
+  const viewRecs = (results || []) as any[];
+  const incErr = await processIncludes(c, 'record_tags', viewRecs, c.req.query('include'), authUser);
+  if (incErr) return incErr;
+  let html = `<!DOCTYPE html><html><head><title>RecordTag List</title></head><body>`;
+  html += `<h1>RecordTag List</h1>`;
+  html += `<a href="/view/record_tags/new">+ New RecordTag</a><br/><br/><table border="1"><thead><tr><th>id</th>`;
+  html += `<th>sake_record_id</th>`;
+  html += `<th>tag_id</th>`;
+  html += `<th>Actions</th></tr></thead><tbody>`;
+  for (const row of viewRecs) {
+    html += `<tr><td>${(row as any).id}</td>`;
+    html += `<td>${escapeHTML((row as any)['sake_record_id'])}</td>`;
+    html += `<td>${escapeHTML((row as any)['tag_id'])}</td>`;
+    html += `<td><a href="/view/record_tags/${(row as any).id}">Detail</a> <a href="/view/record_tags/${(row as any).id}/edit">Edit</a></td></tr>`;
+  }
+  html += `</tbody></table></body></html>`;
+  return c.html(html);
+});
+
+// VIEW NEW /view/record_tags/new
+app.get('/view/record_tags/new', async (c) => {
+  let html = `<!DOCTYPE html><html><head><title>New RecordTag</title></head><body><h1>New RecordTag</h1><form method="POST" action="/view/record_tags">`;
+  html += `<label>sake_record_id: <input type="number" name="sake_record_id" /></label><br/><br/>`;
+  html += `<label>tag_id: <input type="number" name="tag_id" /></label><br/><br/>`;
+  html += `<button type="submit">Save</button></form></body></html>`;
+  return c.html(html);
+});
+
+// VIEW CREATE SUBMIT /view/record_tags
+app.post('/view/record_tags', async (c) => {
+  const formData = await c.req.formData();
+  const body: any = {};
+  formData.forEach((value, key) => { body[key] = value; });
+  const now = new Date().toISOString();
+  await c.env.DB.prepare(insertSql).bind(body['sake_record_id'] !== undefined ? body['sake_record_id'] : null, body['tag_id'] !== undefined ? body['tag_id'] : null, now, now).run();
+  return c.redirect('/view/record_tags', 303);
+});
+
+// VIEW DETAIL /view/record_tags/:id
+app.get('/view/record_tags/:id', async (c) => {
+  const id = c.req.param('id');
+  const record = await c.env.DB.prepare('SELECT * FROM "record_tags" WHERE id = ?').bind(id).first<any>();
+  if (!record) return c.html('<h1>404 Not Found</h1>', 404);
+  const authUser = await getAuthUser(c);
+  const incErr = await processIncludes(c, 'record_tags', [record], c.req.query('include'), authUser);
+  if (incErr) return incErr;
+  let html = `<!DOCTYPE html><html><head><title>RecordTag Detail</title></head><body><h1>RecordTag #${id}</h1><dl>`;
+  html += `<dt>sake_record_id</dt><dd>${escapeHTML(record['sake_record_id'])}</dd>`;
+  html += `<dt>tag_id</dt><dd>${escapeHTML(record['tag_id'])}</dd>`;
   html += `</dl></body></html>`;
   return c.html(html);
 });

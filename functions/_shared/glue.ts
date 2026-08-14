@@ -1,6 +1,29 @@
 import moldApp from "./generated/mold_app";
-import { buildEntry } from "./sake";
-import type { AppEnv } from "./auth";
+import { readSession, type AppEnv } from "./auth";
+
+function imageUrl(key: string) {
+  return `/api/images?key=${encodeURIComponent(key)}`;
+}
+
+export function buildEntry(record: any, images: any[], recordTags: any[], tags: any[]) {
+  const tagsById = new Map(tags.map((tag: any) => [tag.id, tag]));
+  return {
+    id: record.id,
+    record,
+    images: images
+      .sort((left, right) => left.display_order - right.display_order)
+      .map((image: any) => ({
+        ...image,
+        data_url: imageUrl(image.image_key),
+        thumbnail_data_url: image.thumbnail_key ? imageUrl(image.thumbnail_key) : null,
+      })),
+    record_tags: recordTags,
+    tags: recordTags
+      .map((recordTag: any) => tagsById.get(recordTag.tag_id))
+      .filter((tag: any) => Boolean(tag))
+      .map((tag: any) => ({ ...tag, is_default: Boolean(tag.is_default) })),
+  };
+}
 
 export function getMappedEnv(env: AppEnv) {
   const db = env.DB ?? env.alcohol_log;
@@ -19,6 +42,15 @@ export async function fetchSakeRecordsEntry(request: Request, env: AppEnv, ctx?:
     throw new Error("D1 database binding missing");
   }
 
+  // Session guard per drink-log auth policy
+  const session = await readSession(request, mappedEnv);
+  if (!session) {
+    return new Response(JSON.stringify({ error: "unauthorized" }), {
+      status: 401,
+      headers: { "Content-Type": "application/json; charset=utf-8" },
+    });
+  }
+
   // 1. Fetch records via Mold sub-app (limit=100)
   const reqRecords = new Request("http://localhost/api/sake_records?limit=100", request);
   const resRecords = await moldApp.fetch(reqRecords, mappedEnv, ctx);
@@ -29,6 +61,11 @@ export async function fetchSakeRecordsEntry(request: Request, env: AppEnv, ctx?:
   const recordsData = (await resRecords.json()) as { data?: any[] };
   const records = recordsData.data || [];
 
+  // Filter records by session owner
+  const userRow = await db.prepare("SELECT id FROM users WHERE legacy_id = ? OR id = ?").bind(session.userId, session.userId).first<{ id: number }>();
+  const currentOwnerId = userRow ? userRow.id : null;
+  const userRecords = currentOwnerId ? records.filter((r: any) => r.owner_id === currentOwnerId) : [];
+
   // 2. Fetch images and tags via Mold sub-app (limit=100)
   const resImages = await moldApp.fetch(new Request("http://localhost/api/sake_images?limit=100", request), mappedEnv, ctx);
   const resTags = await moldApp.fetch(new Request("http://localhost/api/tags?limit=100", request), mappedEnv, ctx);
@@ -37,7 +74,7 @@ export async function fetchSakeRecordsEntry(request: Request, env: AppEnv, ctx?:
   const rawTags = ((await resTags.json()) as { data?: any[] }).data || [];
 
   // 3. Fetch record_tags directly from D1 (RecordTag permissions are role:admin for REST)
-  const recordIds = records.map((r: any) => r.id);
+  const recordIds = userRecords.map((r: any) => r.id);
   let rawRecordTags: any[] = [];
   if (recordIds.length > 0) {
     const placeholders = recordIds.map(() => "?").join(",");
@@ -48,10 +85,10 @@ export async function fetchSakeRecordsEntry(request: Request, env: AppEnv, ctx?:
     rawRecordTags = stmt.results || [];
   }
 
-  // 4. DYNAMIC USER & ID REMAPPING LAYER (NO hardcoding!)
+  // 4. DYNAMIC USER & ID REMAPPING LAYER
   const ownerIds = Array.from(
     new Set([
-      ...records.map((r: any) => r.owner_id),
+      ...userRecords.map((r: any) => r.owner_id),
       ...rawImages.map((i: any) => i.owner_id),
       ...rawTags.map((t: any) => t.owner_id).filter(Boolean),
     ]),
@@ -69,10 +106,10 @@ export async function fetchSakeRecordsEntry(request: Request, env: AppEnv, ctx?:
     }
   }
 
-  const sakeMap = new Map<number, string>(records.map((r: any) => [r.id, r.legacy_id || String(r.id)]));
+  const sakeMap = new Map<number, string>(userRecords.map((r: any) => [r.id, r.legacy_id || String(r.id)]));
   const tagMap = new Map<number, string>(rawTags.map((t: any) => [t.id, t.legacy_id || String(t.id)]));
 
-  const remappedRecords = records.map((r: any) => {
+  const remappedRecords = userRecords.map((r: any) => {
     const copy = {
       ...r,
       id: r.legacy_id || String(r.id),
@@ -105,7 +142,6 @@ export async function fetchSakeRecordsEntry(request: Request, env: AppEnv, ctx?:
     return copy;
   });
 
-  // record_tags: id and updated_at explicitly excluded per legacy contract
   const remappedRecordTags = rawRecordTags.map((rt: any) => ({
     sake_record_id: sakeMap.get(rt.sake_record_id) || String(rt.sake_record_id),
     record_id: sakeMap.get(rt.sake_record_id) || String(rt.sake_record_id),
@@ -113,7 +149,7 @@ export async function fetchSakeRecordsEntry(request: Request, env: AppEnv, ctx?:
     created_at: rt.created_at,
   }));
 
-  // 5. Group by record_id to prevent cross-record data leakage
+  // 5. Group by record_id
   const imagesByRecordId = new Map<string, any[]>();
   for (const img of remappedImages) {
     const list = imagesByRecordId.get(img.record_id) || [];

@@ -168,7 +168,7 @@ export function getOAuthState(request: Request) {
 }
 
 export function getSessionCookie(request: Request) {
-  return getCookie(request, SESSION_COOKIE);
+  return getCookie(request, "mold_session") || getCookie(request, SESSION_COOKIE);
 }
 
 async function ensureSessionTable(env: AppEnv) {
