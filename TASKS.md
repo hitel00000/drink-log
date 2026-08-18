@@ -33,7 +33,7 @@
 - [x] **공식 문서 체계화**: `docs/DESIGN_GUIDE.md` 수립 및 `AGENTS.md`, `CONTEXT.md` 상호 참조 SSOT 지정
 - [x] **Mold 프레임워크 개선 RFC 작성**: `../mold/docs/tasks/2026-08-19-drink-log-feedback-eager-loading-and-blob-streaming.md` 피드백 문서 등록
 
-### 마일스톤 3: One-Shot Aggregate API 네트워크 통합 및 읽기/쓰기 성능 최적화 (구현 완료)
+### 마일스톤 3: One-Shot Aggregate API 네트워크 통합 및 읽기/쓰기 성능 최적화 (완료)
 - [x] **Step 1: 게이트웨이 원샷 읽기 API (`GET /api/entries`)**
   - `functions/api/[[path]].ts`에 D1 `env.DB.batch()`를 이용한 단일 왕복(Single RTT) 쿼리 및 엣지 조립 핸들러 구현
   - `src/lib/storage.ts`의 `loadSakeRecords()`를 `GET /api/entries` 1회 호출로 전환하여 목록 로딩 4회 ➔ 1회 단축
@@ -43,7 +43,7 @@
 - [x] **Step 3: 게이트웨이 원샷 수정/삭제 API (`PUT /api/entries/:id`, `DELETE /api/entries/:id`)**
   - `functions/api/[[path]].ts`에 기존 사진 키 보존 + D1 배치 갱신/삭제 핸들러 구현
   - `src/lib/storage.ts`의 `updateSakeRecord()` 및 `deleteSakeRecord()`를 원샷 호출로 전환
-- [ ] **Step 4: 통합 검증 및 원격 배포**
+- [x] **Step 4: 통합 검증 및 원격 배포**
   - 3대 검증(`typecheck`, `typecheck:functions`, `build`) 0 error 확인 및 프로덕션 배포
 
 ---
