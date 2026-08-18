@@ -1071,8 +1071,8 @@ export function fileToDataUrl(file: File): Promise<string> {
 
 export async function fileToThumbnailDataUrl(
   file: File,
-  maxSize = 160,
-  quality = 0.76,
+  maxSize = 720,
+  quality = 0.82,
 ): Promise<string> {
   const imageUrl = URL.createObjectURL(file);
 
