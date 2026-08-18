@@ -1,0 +1,1041 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sake Log — Clean Journal Sheet UI Demo</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+KR:wght@300;400;500;600;700&family=Pretendard:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      /* Warm Linen / Minimalist Washi Paper Palette */
+      --bg-base: #f7f4ed;
+      --bg-surface: #ffffff;
+      --bg-elevated: #f0ebd9;
+      --bg-subtle: #f5efe2;
+      --bg-hover: #ece5d3;
+      
+      --border-subtle: rgba(45, 38, 25, 0.08);
+      --border-line: rgba(45, 38, 25, 0.14);
+      --border-focus: #967426;
+      
+      --text-primary: #1c1812;
+      --text-secondary: #635847;
+      --text-tertiary: #998d78;
+      
+      --gold-primary: #967426;
+      --gold-light: #7a5c18;
+      --gold-soft-bg: rgba(150, 116, 38, 0.09);
+      --gold-glow: rgba(150, 116, 38, 0.12);
+      
+      --indigo-accent: #2c4468;
+      --indigo-subtle: rgba(44, 68, 104, 0.08);
+      --indigo-border: rgba(44, 68, 104, 0.22);
+      --indigo-text: #243956;
+      
+      --radius-sm: 6px;
+      --radius-md: 10px;
+      --radius-lg: 16px;
+      --radius-full: 9999px;
+      
+      --font-serif: 'Noto Serif KR', serif;
+      --font-sans: 'Pretendard', -apple-system, BlinkMacSystemFont, sans-serif;
+      
+      --shadow-sheet: 0 4px 24px -4px rgba(45, 38, 25, 0.06);
+      --transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    body {
+      background-color: var(--bg-base);
+      color: var(--text-primary);
+      font-family: var(--font-sans);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      line-height: 1.5;
+    }
+
+    .app-container {
+      width: 100%;
+      max-width: 1080px;
+      padding: 0 16px 80px;
+    }
+
+    /* ====================================================
+       1. INTEGRATED HEADER & USER PROFILE BAR
+    ==================================================== */
+    .top-bar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 20px 0 24px;
+      position: sticky;
+      top: 0;
+      background: linear-gradient(180deg, var(--bg-base) 88%, transparent 100%);
+      z-index: 100;
+      backdrop-filter: blur(10px);
+    }
+
+    .brand-title {
+      font-family: var(--font-serif);
+      font-size: 1.35rem;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      color: var(--text-primary);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .brand-title .kanji-logo {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 30px;
+      height: 30px;
+      border-radius: var(--radius-sm);
+      background: var(--gold-soft-bg);
+      border: 1px solid rgba(150, 116, 38, 0.25);
+      color: var(--gold-primary);
+      font-size: 1rem;
+      font-weight: 700;
+    }
+
+    .user-profile-widget {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      background: var(--bg-surface);
+      border: 1px solid var(--border-subtle);
+      padding: 4px 12px 4px 6px;
+      border-radius: var(--radius-full);
+      box-shadow: 0 2px 8px rgba(45, 38, 25, 0.04);
+      cursor: pointer;
+      transition: var(--transition);
+    }
+
+    .user-profile-widget:hover {
+      border-color: var(--border-line);
+    }
+
+    .user-avatar-img {
+      width: 26px;
+      height: 26px;
+      border-radius: 50%;
+      object-fit: cover;
+    }
+
+    .user-name-text {
+      font-size: 0.8rem;
+      font-weight: 500;
+      color: var(--text-primary);
+    }
+
+    .sync-indicator-icon {
+      color: var(--gold-primary);
+      display: flex;
+      align-items: center;
+      font-size: 0.75rem;
+    }
+
+    /* View Switcher */
+    .view-switcher-wrapper {
+      display: flex;
+      justify-content: center;
+      margin-bottom: 24px;
+    }
+
+    .view-switcher {
+      display: inline-grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      background: var(--bg-surface);
+      border: 1px solid var(--border-subtle);
+      padding: 3px;
+      border-radius: var(--radius-md);
+      width: 100%;
+      max-width: 420px;
+      box-shadow: 0 2px 10px rgba(45, 38, 25, 0.04);
+    }
+
+    .view-tab {
+      background: transparent;
+      border: none;
+      color: var(--text-secondary);
+      padding: 8px 14px;
+      border-radius: var(--radius-sm);
+      font-size: 0.84rem;
+      font-weight: 500;
+      cursor: pointer;
+      transition: var(--transition);
+      font-family: var(--font-sans);
+      text-align: center;
+    }
+
+    .view-tab.active {
+      background: var(--bg-elevated);
+      color: var(--text-primary);
+      font-weight: 600;
+      box-shadow: 0 1px 4px rgba(45, 38, 25, 0.08);
+    }
+
+    /* ====================================================
+       2. SEAMLESS JOURNAL SHEET (ZERO-CLUTTER 폼 구조)
+    ==================================================== */
+    .journal-sheet {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-lg);
+      box-shadow: var(--shadow-sheet);
+      overflow: hidden;
+      padding: 24px;
+      margin-bottom: 24px;
+    }
+
+    .sheet-section {
+      padding: 20px 0;
+      border-bottom: 1px solid var(--border-subtle);
+    }
+
+    .sheet-section:first-child {
+      padding-top: 0;
+    }
+
+    .sheet-section:last-child {
+      border-bottom: none;
+      padding-bottom: 0;
+    }
+
+    .section-heading {
+      font-family: var(--font-serif);
+      font-size: 0.96rem;
+      font-weight: 600;
+      color: var(--text-primary);
+      margin-bottom: 14px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    /* Seamless Underline Inputs */
+    .hero-name-input {
+      width: 100%;
+      border: none;
+      border-bottom: 1.5px solid var(--border-line);
+      background: transparent;
+      padding: 8px 0 10px;
+      font-family: var(--font-serif);
+      font-size: 1.35rem;
+      font-weight: 600;
+      color: var(--text-primary);
+      outline: none;
+      transition: var(--transition);
+      margin-bottom: 18px;
+    }
+
+    .hero-name-input:focus {
+      border-color: var(--gold-primary);
+    }
+
+    .hero-name-input::placeholder {
+      color: var(--text-tertiary);
+      font-weight: 400;
+    }
+
+    .inline-spec-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px 16px;
+    }
+
+    .spec-field-group {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .spec-field-label {
+      font-size: 0.72rem;
+      font-weight: 500;
+      color: var(--text-tertiary);
+    }
+
+    .spec-field-input {
+      width: 100%;
+      background: var(--bg-subtle);
+      border: 1px solid transparent;
+      border-radius: var(--radius-sm);
+      padding: 9px 12px;
+      font-size: 0.88rem;
+      color: var(--text-primary);
+      font-family: var(--font-sans);
+      outline: none;
+      transition: var(--transition);
+    }
+
+    .spec-field-input:focus {
+      background: #ffffff;
+      border-color: var(--border-focus);
+      box-shadow: 0 0 0 2px var(--gold-glow);
+    }
+
+    /* 3. Drink Again: Minimal Segmented Bar */
+    .segmented-choice-bar {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      background: var(--bg-subtle);
+      padding: 4px;
+      border-radius: var(--radius-md);
+      gap: 4px;
+    }
+
+    .segmented-choice-btn {
+      background: transparent;
+      border: none;
+      border-radius: var(--radius-sm);
+      padding: 10px 6px;
+      font-size: 0.86rem;
+      font-family: var(--font-serif);
+      color: var(--text-secondary);
+      cursor: pointer;
+      transition: var(--transition);
+      text-align: center;
+    }
+
+    .segmented-choice-btn.active {
+      background: var(--bg-surface);
+      color: var(--gold-dark);
+      font-weight: 700;
+      box-shadow: 0 2px 6px rgba(45, 38, 25, 0.08);
+    }
+
+    /* 4. Ratings: Stepped Pill Track */
+    .rating-item-row {
+      margin-bottom: 14px;
+    }
+
+    .rating-item-row:last-child {
+      margin-bottom: 0;
+    }
+
+    .rating-item-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 0.8rem;
+      margin-bottom: 6px;
+    }
+
+    .rating-item-title {
+      font-weight: 500;
+      color: var(--text-secondary);
+    }
+
+    .rating-item-val {
+      font-weight: 600;
+      color: var(--gold-primary);
+      font-size: 0.8rem;
+    }
+
+    .rating-pill-track {
+      display: flex;
+      background: var(--bg-subtle);
+      border-radius: var(--radius-sm);
+      padding: 3px;
+      gap: 3px;
+    }
+
+    .rating-pill-step {
+      flex: 1;
+      height: 32px;
+      background: transparent;
+      border: none;
+      border-radius: 4px;
+      color: var(--text-secondary);
+      font-size: 0.76rem;
+      cursor: pointer;
+      transition: var(--transition);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0 2px;
+      font-family: var(--font-sans);
+    }
+
+    .rating-pill-step:hover {
+      color: var(--text-primary);
+    }
+
+    .rating-pill-step.active {
+      background: var(--gold-primary);
+      color: #ffffff;
+      font-weight: 600;
+      box-shadow: 0 1px 4px rgba(150, 116, 38, 0.25);
+    }
+
+    /* 5. Tag Stream: Natural Linen Flow */
+    .tag-category-block {
+      margin-bottom: 12px;
+    }
+
+    .tag-category-block:last-child {
+      margin-bottom: 0;
+    }
+
+    .tag-category-lead {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-bottom: 6px;
+    }
+
+    .tag-lead-name {
+      font-size: 0.74rem;
+      font-weight: 600;
+      color: var(--text-tertiary);
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+
+    .tag-chip-flow {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+
+    .chip-item {
+      background: var(--bg-subtle);
+      border: 1px solid transparent;
+      color: var(--text-secondary);
+      padding: 5px 11px;
+      border-radius: var(--radius-full);
+      font-size: 0.78rem;
+      cursor: pointer;
+      transition: var(--transition);
+      display: inline-flex;
+      align-items: center;
+    }
+
+    .chip-item:hover {
+      background: var(--bg-elevated);
+      color: var(--text-primary);
+    }
+
+    .chip-item.active {
+      background: var(--indigo-subtle);
+      border-color: var(--indigo-border);
+      color: var(--indigo-text);
+      font-weight: 600;
+    }
+
+    .chip-item.btn-add-tag {
+      border: 1px dashed var(--gold-primary);
+      background: transparent;
+      color: var(--gold-primary);
+      font-weight: 500;
+    }
+
+    .chip-item.btn-add-tag:hover {
+      background: var(--gold-soft-bg);
+    }
+
+    /* 6. Quote Note Input */
+    .quote-note-input {
+      width: 100%;
+      background: var(--bg-subtle);
+      border: 1px solid transparent;
+      border-left: 3px solid var(--gold-primary);
+      border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+      padding: 12px 14px;
+      font-family: var(--font-serif);
+      font-size: 0.9rem;
+      color: var(--text-primary);
+      outline: none;
+      transition: var(--transition);
+      resize: none;
+    }
+
+    .quote-note-input:focus {
+      background: #ffffff;
+      border-color: var(--border-subtle);
+      border-left-color: var(--gold-primary);
+      box-shadow: 0 0 0 2px var(--gold-glow);
+    }
+
+    /* Photo Component */
+    .photo-hero-wrapper {
+      position: relative;
+      width: 100%;
+      height: 240px;
+      border-radius: var(--radius-md);
+      overflow: hidden;
+      background: var(--bg-subtle);
+      margin-bottom: 10px;
+    }
+
+    .photo-hero-wrapper img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    .photo-hero-badge {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      background: rgba(255, 255, 255, 0.9);
+      backdrop-filter: blur(6px);
+      color: var(--gold-dark);
+      font-size: 0.7rem;
+      font-weight: 600;
+      padding: 3px 8px;
+      border-radius: var(--radius-sm);
+      border: 1px solid rgba(150, 116, 38, 0.2);
+    }
+
+    .photo-strip {
+      display: flex;
+      gap: 8px;
+      overflow-x: auto;
+    }
+
+    .photo-thumb {
+      width: 56px;
+      height: 56px;
+      border-radius: var(--radius-sm);
+      border: 2px solid transparent;
+      overflow: hidden;
+      cursor: pointer;
+      flex-shrink: 0;
+    }
+
+    .photo-thumb img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    .photo-thumb.active {
+      border-color: var(--gold-primary);
+    }
+
+    .photo-btn-add {
+      width: 56px;
+      height: 56px;
+      border-radius: var(--radius-sm);
+      border: 1px dashed var(--gold-primary);
+      background: var(--bg-subtle);
+      color: var(--gold-primary);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.7rem;
+      font-weight: 600;
+      cursor: pointer;
+      flex-shrink: 0;
+    }
+
+    /* Submit CTA Button */
+    .btn-submit-action {
+      width: 100%;
+      background: linear-gradient(135deg, var(--gold-primary) 0%, #7a5c18 100%);
+      color: #ffffff;
+      border: none;
+      border-radius: var(--radius-md);
+      padding: 15px;
+      font-size: 0.98rem;
+      font-weight: 600;
+      font-family: var(--font-serif);
+      letter-spacing: 0.04em;
+      cursor: pointer;
+      box-shadow: 0 4px 16px rgba(150, 116, 38, 0.22);
+      transition: var(--transition);
+      margin-top: 10px;
+    }
+
+    .btn-submit-action:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 6px 20px rgba(150, 116, 38, 0.3);
+    }
+
+    /* ====================================================
+       DESKTOP RESPONSIVE (min-width: 880px)
+    ==================================================== */
+    @media (min-width: 880px) {
+      .desktop-sheet-split {
+        display: grid;
+        grid-template-columns: 380px 1fr;
+        gap: 32px;
+        align-items: start;
+      }
+
+      .sticky-photo-col {
+        position: sticky;
+        top: 100px;
+      }
+
+      .photo-hero-wrapper {
+        height: 320px;
+      }
+
+      .desktop-gallery-3col {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 20px;
+      }
+    }
+
+    /* Collection List Item */
+    .collection-card {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-lg);
+      overflow: hidden;
+      cursor: pointer;
+      transition: var(--transition);
+      box-shadow: var(--shadow-sheet);
+      display: flex;
+      flex-direction: column;
+    }
+
+    .collection-card:hover {
+      transform: translateY(-3px);
+      border-color: rgba(45, 38, 25, 0.18);
+    }
+
+    .collection-card-img {
+      width: 100%;
+      height: 180px;
+      object-fit: cover;
+    }
+
+    .collection-card-body {
+      padding: 16px;
+    }
+
+    .collection-title {
+      font-family: var(--font-serif);
+      font-size: 1.05rem;
+      font-weight: 600;
+      margin-bottom: 4px;
+    }
+
+    .collection-sub {
+      font-size: 0.78rem;
+      color: var(--text-secondary);
+      margin-bottom: 12px;
+    }
+
+    .collection-badges {
+      display: flex;
+      gap: 4px;
+      flex-wrap: wrap;
+    }
+
+    .mini-pill {
+      font-size: 0.7rem;
+      padding: 2px 7px;
+      border-radius: var(--radius-full);
+      background: var(--bg-subtle);
+      color: var(--text-secondary);
+    }
+
+    .mini-pill.gold {
+      background: var(--gold-soft-bg);
+      color: var(--gold-dark);
+      font-weight: 600;
+    }
+  </style>
+</head>
+<body>
+
+<div class="app-container">
+  <!-- Top Navigation & Integrated Profile -->
+  <header class="top-bar">
+    <div class="brand-title">
+      <span class="kanji-logo">酒</span> SAKE LOG
+    </div>
+    
+    <!-- Seamless User Profile & Cloud Sync -->
+    <div style="display:flex; align-items:center; gap:10px;">
+      <a href="landing-preview.html" style="font-size:0.8rem; color:var(--gold-primary); text-decoration:none; font-weight:600; padding:6px 12px; border-radius:var(--radius-full); background:var(--gold-soft-bg); border:1px solid var(--border-focus);">
+        ← 랜딩 페이지 보기
+      </a>
+      <div class="user-profile-widget" title="Google 로그인 계정 (Cloud Sync)">
+        <img src="https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80" class="user-avatar-img" alt="Avatar">
+        <span class="user-name-text">hitel00000</span>
+        <span class="sync-indicator-icon">☁️</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- View Switcher -->
+  <div class="view-switcher-wrapper">
+    <nav class="view-switcher">
+      <button class="view-tab active" onclick="switchView('write', this)">기록 작성</button>
+      <button class="view-tab" onclick="switchView('detail', this)">상세 카드</button>
+      <button class="view-tab" onclick="switchView('list', this)">컬렉션 갤러리</button>
+    </nav>
+  </div>
+
+  <!-- ====================================================
+       VIEW 1: SEAMLESS JOURNAL SHEET (작성 뷰)
+  ==================================================== -->
+  <main id="viewWrite">
+    <div class="desktop-sheet-split">
+      
+      <!-- LEFT: Photo Canvas & Priority Verdict -->
+      <div class="sticky-photo-col">
+        <div class="journal-sheet" style="padding:18px;">
+          <!-- 1. Photos -->
+          <div class="photo-hero-wrapper">
+            <span class="photo-hero-badge">★ 대표 이미지</span>
+            <img id="mainHeroImg" src="https://images.unsplash.com/photo-1582878826629-29b7ad1cdc43?w=800&auto=format&fit=crop&q=80" alt="Main Hero">
+          </div>
+          <div class="photo-strip">
+            <div class="photo-thumb active" onclick="selectThumb(this, 'https://images.unsplash.com/photo-1582878826629-29b7ad1cdc43?w=800&auto=format&fit=crop&q=80')">
+              <img src="https://images.unsplash.com/photo-1582878826629-29b7ad1cdc43?w=200&auto=format&fit=crop&q=80" alt="T1">
+            </div>
+            <div class="photo-thumb" onclick="selectThumb(this, 'https://images.unsplash.com/photo-1569718212165-3a8278d5f624?w=800&auto=format&fit=crop&q=80')">
+              <img src="https://images.unsplash.com/photo-1569718212165-3a8278d5f624?w=200&auto=format&fit=crop&q=80" alt="T2">
+            </div>
+            <div class="photo-thumb" onclick="selectThumb(this, 'https://images.unsplash.com/photo-1527061011665-3652c757a4d4?w=800&auto=format&fit=crop&q=80')">
+              <img src="https://images.unsplash.com/photo-1527061011665-3652c757a4d4?w=200&auto=format&fit=crop&q=80" alt="T3">
+            </div>
+            <div class="photo-btn-add" onclick="alert('새 사진 추가 업로드')">+ 추가</div>
+          </div>
+
+          <!-- 3. Drink Again -->
+          <div style="margin-top:18px;">
+            <div class="section-heading" style="margin-bottom:8px;">다시 마실까?</div>
+            <div class="segmented-choice-bar">
+              <button class="segmented-choice-btn" onclick="selectChoice(this)">별로</button>
+              <button class="segmented-choice-btn" onclick="selectChoice(this)">잘모르겠음</button>
+              <button class="segmented-choice-btn active" onclick="selectChoice(this)">다시 마신다</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- RIGHT: Seamless Single Journal Sheet -->
+      <div class="journal-sheet">
+        <!-- 2. Basic Info -->
+        <div class="sheet-section">
+          <input type="text" class="hero-name-input" value="獺祭 23 純米大吟醸 (닷사이 23)" placeholder="술 이름을 입력하세요 *">
+          
+          <div class="inline-spec-grid">
+            <div class="spec-field-group">
+              <span class="spec-field-label">지역</span>
+              <input type="text" class="spec-field-input" value="야마구치현" placeholder="예: 니가타현">
+            </div>
+            <div class="spec-field-group">
+              <span class="spec-field-label">양조장</span>
+              <input type="text" class="spec-field-input" value="아사히주조" placeholder="양조장 이름">
+            </div>
+            <div class="spec-field-group">
+              <span class="spec-field-label">쌀 / 정미율</span>
+              <input type="text" class="spec-field-input" value="야마다니시키 (23%)" placeholder="예: 오마치 (50%)">
+            </div>
+            <div class="spec-field-group">
+              <span class="spec-field-label">종류</span>
+              <input type="text" class="spec-field-input" value="준마이다이긴죠" placeholder="예: 준마이긴죠">
+            </div>
+            <div class="spec-field-group">
+              <span class="spec-field-label">도수 / 일본주도</span>
+              <input type="text" class="spec-field-input" value="16% · +1" placeholder="예: 15% · +3">
+            </div>
+            <div class="spec-field-group">
+              <span class="spec-field-label">용량 / 가격</span>
+              <input type="text" class="spec-field-input" value="720ml · 5,500엔" placeholder="예: 720ml · 3만원">
+            </div>
+          </div>
+        </div>
+
+        <!-- 4. Ratings -->
+        <div class="sheet-section">
+          <div class="section-heading">평가</div>
+          
+          <div class="rating-item-row">
+            <div class="rating-item-header">
+              <span class="rating-item-title">달콤함 — 드라이함</span>
+              <span class="rating-item-val" id="valSweet">달콤함 (2)</span>
+            </div>
+            <div class="rating-pill-track">
+              <button class="rating-pill-step" onclick="setStep('valSweet', '아주 달콤함 (1)', this)">아주달콤</button>
+              <button class="rating-pill-step active" onclick="setStep('valSweet', '달콤함 (2)', this)">달콤</button>
+              <button class="rating-pill-step" onclick="setStep('valSweet', '보통 (3)', this)">보통</button>
+              <button class="rating-pill-step" onclick="setStep('valSweet', '드라이함 (4)', this)">드라이</button>
+              <button class="rating-pill-step" onclick="setStep('valSweet', '아주 드라이함 (5)', this)">아주드라이</button>
+            </div>
+          </div>
+
+          <div class="rating-item-row">
+            <div class="rating-item-header">
+              <span class="rating-item-title">은은함 — 화려함</span>
+              <span class="rating-item-val" id="valAroma">화려한향 (3)</span>
+            </div>
+            <div class="rating-pill-track">
+              <button class="rating-pill-step" onclick="setStep('valAroma', '은은한향 (1)', this)">은은한향</button>
+              <button class="rating-pill-step" onclick="setStep('valAroma', '보통 (2)', this)">보통</button>
+              <button class="rating-pill-step active" onclick="setStep('valAroma', '화려한향 (3)', this)">화려한향</button>
+            </div>
+          </div>
+
+          <div class="rating-item-row">
+            <div class="rating-item-header">
+              <span class="rating-item-title">산미</span>
+              <span class="rating-item-val" id="valAcidity">산미보통 (2)</span>
+            </div>
+            <div class="rating-pill-track">
+              <button class="rating-pill-step" onclick="setStep('valAcidity', '산미없음 (1)', this)">산미없음</button>
+              <button class="rating-pill-step active" onclick="setStep('valAcidity', '산미보통 (2)', this)">산미보통</button>
+              <button class="rating-pill-step" onclick="setStep('valAcidity', '산미높음 (3)', this)">산미높음</button>
+            </div>
+          </div>
+
+          <div class="rating-item-row">
+            <div class="rating-item-header">
+              <span class="rating-item-title">깔끔함 — 감칠맛</span>
+              <span class="rating-item-val" id="valClean">깔끔함 (1)</span>
+            </div>
+            <div class="rating-pill-track">
+              <button class="rating-pill-step active" onclick="setStep('valClean', '깔끔함 (1)', this)">깔끔함</button>
+              <button class="rating-pill-step" onclick="setStep('valClean', '보통 (2)', this)">보통</button>
+              <button class="rating-pill-step" onclick="setStep('valClean', '감칠맛좋은 (3)', this)">감칠맛좋은</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 5. One Line Note -->
+        <div class="sheet-section">
+          <div class="section-heading">한줄 메모</div>
+          <textarea class="quote-note-input" rows="2" placeholder="오늘 마신 느낌을 한 줄로 남겨보세요.">“멜론과 사과의 맑고 투명한 단맛. 목넘김이 비단처럼 부드러움.”</textarea>
+        </div>
+
+        <!-- 6. Characteristic Tags -->
+        <div class="sheet-section">
+          <div class="section-heading">특성 태그</div>
+          
+          <!-- Taste -->
+          <div class="tag-category-block">
+            <div class="tag-category-lead">
+              <span class="tag-lead-name">맛 Taste</span>
+            </div>
+            <div class="tag-chip-flow" id="flowTaste">
+              <button class="chip-item active" onclick="toggleTag(this)">산뜻</button>
+              <button class="chip-item active" onclick="toggleTag(this)">부드러움</button>
+              <button class="chip-item" onclick="toggleTag(this)">감칠</button>
+              <button class="chip-item" onclick="toggleTag(this)">깔끔함</button>
+              <button class="chip-item" onclick="toggleTag(this)">진함</button>
+              <button class="chip-item" onclick="toggleTag(this)">쌉쌀함</button>
+              <button class="chip-item" onclick="toggleTag(this)">달콤함</button>
+              <button class="chip-item btn-add-tag" onclick="addTag('flowTaste')">+ 직접입력</button>
+            </div>
+          </div>
+
+          <!-- Aroma -->
+          <div class="tag-category-block">
+            <div class="tag-category-lead">
+              <span class="tag-lead-name">향 Aroma</span>
+            </div>
+            <div class="tag-chip-flow" id="flowAroma">
+              <button class="chip-item active" onclick="toggleTag(this)">사과</button>
+              <button class="chip-item active" onclick="toggleTag(this)">멜론</button>
+              <button class="chip-item" onclick="toggleTag(this)">과일</button>
+              <button class="chip-item" onclick="toggleTag(this)">꽃</button>
+              <button class="chip-item" onclick="toggleTag(this)">쌀</button>
+              <button class="chip-item" onclick="toggleTag(this)">누룩</button>
+              <button class="chip-item" onclick="toggleTag(this)">배</button>
+              <button class="chip-item" onclick="toggleTag(this)">파인애플</button>
+              <button class="chip-item" onclick="toggleTag(this)">허브</button>
+              <button class="chip-item" onclick="toggleTag(this)">요구르트</button>
+              <button class="chip-item" onclick="toggleTag(this)">견과</button>
+              <button class="chip-item btn-add-tag" onclick="addTag('flowAroma')">+ 직접입력</button>
+            </div>
+          </div>
+
+          <!-- Mood -->
+          <div class="tag-category-block">
+            <div class="tag-category-lead">
+              <span class="tag-lead-name">느낌 Mood</span>
+            </div>
+            <div class="tag-chip-flow" id="flowMood">
+              <button class="chip-item" onclick="toggleTag(this)">독특</button>
+              <button class="chip-item" onclick="toggleTag(this)">무난</button>
+              <button class="chip-item" onclick="toggleTag(this)">안주페어링</button>
+              <button class="chip-item" onclick="toggleTag(this)">식전주</button>
+              <button class="chip-item btn-add-tag" onclick="addTag('flowMood')">+ 직접입력</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 7. Context -->
+        <div class="sheet-section">
+          <div class="section-heading">외부 정보</div>
+          <div class="inline-spec-grid">
+            <div class="spec-field-group">
+              <span class="spec-field-label">장소</span>
+              <input type="text" class="spec-field-input" value="긴자 사케바 유라리" placeholder="마신 장소">
+            </div>
+            <div class="spec-field-group">
+              <span class="spec-field-label">날짜</span>
+              <input type="date" class="spec-field-input" value="2026-08-19">
+            </div>
+            <div class="spec-field-group">
+              <span class="spec-field-label">안주</span>
+              <input type="text" class="spec-field-input" value="참치 뱃살 사시미, 도미 머리 조림" placeholder="함께 곁들인 음식">
+            </div>
+            <div class="spec-field-group">
+              <span class="spec-field-label">동행</span>
+              <input type="text" class="spec-field-input" value="팀 동료들" placeholder="함께 마신 사람">
+            </div>
+          </div>
+        </div>
+
+        <button class="btn-submit-action" onclick="alert('정갈한 사케 기록이 클라우드에 안전하게 저장되었습니다.')">기록 완료하기</button>
+      </div>
+
+    </div>
+  </main>
+
+  <!-- ====================================================
+       VIEW 2: DETAIL CARD
+  ==================================================== -->
+  <main id="viewDetail" style="display:none;">
+    <div class="journal-sheet" style="padding:0;">
+      <img src="https://images.unsplash.com/photo-1582878826629-29b7ad1cdc43?w=900&auto=format&fit=crop&q=80" style="width:100%; height:320px; object-fit:cover;" alt="Detail Hero">
+      <div style="padding:24px;">
+        <div style="font-family:var(--font-serif); font-size:1.55rem; font-weight:600; margin-bottom:4px;">獺祭 23 純米大吟醸 (닷사이 23)</div>
+        <div style="font-size:0.85rem; color:var(--text-secondary); margin-bottom:16px;">야마구치현 · 아사히주조 · 준마이다이긴죠</div>
+        
+        <div style="display:flex; gap:6px; margin-bottom:18px;">
+          <span class="mini-pill gold">✨ 다시 마신다</span>
+          <span class="mini-pill">화려한향</span>
+          <span class="mini-pill">달콤함</span>
+          <span class="mini-pill">깔끔함</span>
+        </div>
+
+        <div style="background:var(--bg-subtle); border-left:3px solid var(--gold-primary); padding:14px 16px; border-radius:0 var(--radius-sm) var(--radius-sm) 0; font-family:var(--font-serif); font-size:0.92rem; font-style:italic; margin-bottom:20px;">
+          “멜론과 사과의 맑고 투명한 단맛. 목넘김이 비단처럼 부드러움.”
+        </div>
+
+        <div style="display:flex; gap:6px; flex-wrap:wrap; margin-bottom:20px;">
+          <span class="chip-item active">맛: 산뜻</span>
+          <span class="chip-item active">맛: 부드러움</span>
+          <span class="chip-item active">향: 사과</span>
+          <span class="chip-item active">향: 멜론</span>
+        </div>
+
+        <div class="inline-spec-grid" style="font-size:0.84rem; border-top:1px solid var(--border-subtle); padding-top:16px;">
+          <div><span style="color:var(--text-tertiary);">원료미:</span> 야마다니시키 (23%)</div>
+          <div><span style="color:var(--text-tertiary);">도수/일본주도:</span> 16% / +1</div>
+          <div><span style="color:var(--text-tertiary);">장소:</span> 긴자 사케바 유라리</div>
+          <div><span style="color:var(--text-tertiary);">안주:</span> 참치 뱃살 사시미, 도미 조림</div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <!-- ====================================================
+       VIEW 3: COLLECTION GALLERY
+  ==================================================== -->
+  <main id="viewList" style="display:none;">
+    <div class="desktop-gallery-3col">
+      <div class="collection-card" onclick="switchView('detail', document.querySelectorAll('.view-tab')[1])">
+        <img src="https://images.unsplash.com/photo-1582878826629-29b7ad1cdc43?w=800&auto=format&fit=crop&q=80" class="collection-card-img" alt="Dassai">
+        <div class="collection-card-body">
+          <div class="collection-title">닷사이 23 준마이다이긴죠</div>
+          <div class="collection-sub">야마구치현 · 2026.08.19</div>
+          <div class="collection-badges">
+            <span class="mini-pill gold">다시마신다</span>
+            <span class="mini-pill">사과</span>
+            <span class="mini-pill">부드러움</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="collection-card">
+        <img src="https://images.unsplash.com/photo-1569718212165-3a8278d5f624?w=800&auto=format&fit=crop&q=80" class="collection-card-img" alt="Kubota">
+        <div class="collection-card-body">
+          <div class="collection-title">쿠보타 만쥬 (久保田 萬寿)</div>
+          <div class="collection-sub">니가타현 · 2026.08.12</div>
+          <div class="collection-badges">
+            <span class="mini-pill gold">다시마신다</span>
+            <span class="mini-pill">깔끔함</span>
+            <span class="mini-pill">은은한향</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="collection-card">
+        <img src="https://images.unsplash.com/photo-1527061011665-3652c757a4d4?w=800&auto=format&fit=crop&q=80" class="collection-card-img" alt="Jikon">
+        <div class="collection-card-body">
+          <div class="collection-title">지콘 특별준마이 (而今)</div>
+          <div class="collection-sub">미에현 · 2026.07.28</div>
+          <div class="collection-badges">
+            <span class="mini-pill gold">다시마신다</span>
+            <span class="mini-pill">감칠맛</span>
+            <span class="mini-pill">멜론</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script>
+  function switchView(viewName, tabEl) {
+    document.querySelectorAll('.view-tab').forEach(el => el.classList.remove('active'));
+    tabEl.classList.add('active');
+
+    document.getElementById('viewWrite').style.display = viewName === 'write' ? 'block' : 'none';
+    document.getElementById('viewDetail').style.display = viewName === 'detail' ? 'block' : 'none';
+    document.getElementById('viewList').style.display = viewName === 'list' ? 'block' : 'none';
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  function selectThumb(thumbEl, imgSrc) {
+    document.querySelectorAll('.photo-thumb').forEach(el => el.classList.remove('active'));
+    thumbEl.classList.add('active');
+    document.getElementById('mainHeroImg').src = imgSrc;
+  }
+
+  function selectChoice(btn) {
+    btn.parentElement.querySelectorAll('.segmented-choice-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+  }
+
+  function setStep(labelId, valText, btn) {
+    btn.parentElement.querySelectorAll('.rating-pill-step').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById(labelId).textContent = valText;
+  }
+
+  function toggleTag(btn) {
+    btn.classList.toggle('active');
+  }
+
+  function addTag(flowId) {
+    const tag = prompt("새로운 특성 태그를 입력하세요 (최대 20자):");
+    if (tag && tag.trim()) {
+      const flow = document.getElementById(flowId);
+      const addBtn = flow.querySelector('.btn-add-tag');
+      const newChip = document.createElement('button');
+      newChip.className = 'chip-item active';
+      newChip.textContent = tag.trim().slice(0, 20);
+      newChip.onclick = function() { toggleTag(this); };
+      flow.insertBefore(newChip, addBtn);
+    }
+  }
+</script>
+</body>
+</html>
