@@ -16,6 +16,7 @@ const SAKE_IMAGES_STORE = "sake_images";
 const SAKE_TAGS_STORE = "tags";
 const SAKE_RECORD_TAGS_STORE = "record_tags";
 const CLOUD_IMAGE_SRC_PREFIX = "/api/images?key=";
+const CLOUD_ENTRIES_PATH = "/api/entries";
 const CLOUD_SAKE_RECORDS_PATH = "/api/sake_records";
 const CLOUD_SAKE_IMAGES_PATH = "/api/sake_images";
 const CLOUD_TAGS_PATH = "/api/tags";
@@ -560,6 +561,15 @@ export async function loadSakeRecords(
   ownerId: number | string = LOCAL_OWNER_ID,
 ): Promise<SakeRecordEntry[]> {
   if (cloudStorageEnabled) {
+    try {
+      const entries = await cloudFetchData<SakeRecordEntry[]>(CLOUD_ENTRIES_PATH);
+      if (Array.isArray(entries)) {
+        return entries;
+      }
+    } catch (e) {
+      console.warn("One-shot /api/entries failed, falling back to legacy multi-fetch:", e);
+    }
+
     const [records, images, recordTags, tags] = await Promise.all([
       fetchAllPages<SakeRecord>(CLOUD_SAKE_RECORDS_PATH),
       fetchAllPages<SakeImage>(CLOUD_SAKE_IMAGES_PATH),
@@ -662,23 +672,8 @@ export async function getSakeRecordById(
 ): Promise<SakeRecordEntry | undefined> {
   if (cloudStorageEnabled) {
     try {
-      const record = await cloudFetchData<SakeRecord>(
-        `${CLOUD_SAKE_RECORDS_PATH}/${encodeURIComponent(String(id))}`,
-      );
-      if (!record) return undefined;
-
-      const [images, recordTags, tags] = await Promise.all([
-        fetchAllPages<SakeImage>(CLOUD_SAKE_IMAGES_PATH),
-        fetchAllPages<SakeRecordTag>(CLOUD_RECORD_TAGS_PATH),
-        fetchAllPages<SakeTag>(CLOUD_TAGS_PATH),
-      ]);
-
-      const recImages = images.filter((img) => String(img.record_id) === String(id));
-      const recRecordTags = recordTags.filter(
-        (rt) => String(rt.sake_record_id ?? rt.record_id) === String(id),
-      );
-
-      return buildSakeRecordEntry(record, recImages, recRecordTags, tags);
+      const records = await loadSakeRecords(ownerId);
+      return records.find((r) => String(r.id) === String(id));
     } catch (error) {
       if (error instanceof CloudStorageError && error.status === 404) {
         return undefined;

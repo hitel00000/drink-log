@@ -369,6 +369,83 @@ async function prepareMoldRequest(request: Request, env: AppEnv): Promise<Reques
   return new Request(request, { headers: newHeaders });
 }
 
+export async function handleEntriesGet(request: Request, env: AppEnv) {
+  const session = await readSession(request, env);
+  if (!session) {
+    return new Response(JSON.stringify({ error: "Unauthorized" }), {
+      status: 401,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  const db = getDatabase(env);
+  const [recordsRes, imagesRes, recordTagsRes, tagsRes] = await db.batch([
+    db.prepare(
+      `SELECT * FROM sake_records WHERE owner_id = ? AND drink_type = 'sake' ORDER BY consumed_date DESC, created_at DESC`,
+    ).bind(session.userId),
+    db.prepare(
+      `SELECT * FROM sake_images WHERE owner_id = ? ORDER BY display_order ASC, created_at ASC`,
+    ).bind(session.userId),
+    db.prepare(`SELECT * FROM record_tags`),
+    db.prepare(
+      `SELECT * FROM tags WHERE drink_type = 'sake' AND (owner_id IS NULL OR owner_id = ?) ORDER BY tag_group ASC, is_default DESC, label ASC`,
+    ).bind(session.userId),
+  ]);
+
+  const records = (recordsRes.results || []) as any[];
+  const images = (imagesRes.results || []) as any[];
+  const recordTags = (recordTagsRes.results || []) as any[];
+  const tags = (tagsRes.results || []) as any[];
+
+  const tagsById = new Map<string, any>(tags.map((t) => [String(t.id), t]));
+
+  const imagesByRecordId = new Map<string, any[]>();
+  for (const img of images) {
+    const k = String(img.record_id);
+    const list = imagesByRecordId.get(k) ?? [];
+    list.push({
+      ...img,
+      data_url: img.image_key ? `/api/images?key=${encodeURIComponent(img.image_key)}` : null,
+      thumbnail_data_url: img.thumbnail_key ? `/api/images?key=${encodeURIComponent(img.thumbnail_key)}` : null,
+    });
+    imagesByRecordId.set(k, list);
+  }
+
+  const recordTagsByRecordId = new Map<string, any[]>();
+  for (const rt of recordTags) {
+    const k = String(rt.sake_record_id ?? rt.record_id);
+    const list = recordTagsByRecordId.get(k) ?? [];
+    list.push(rt);
+    recordTagsByRecordId.set(k, list);
+  }
+
+  const entries = records.map((record) => {
+    const recId = String(record.id);
+    const recImages = imagesByRecordId.get(recId) ?? [];
+    const recTagsList = recordTagsByRecordId.get(recId) ?? [];
+    const recTags = recTagsList
+      .map((rt) => tagsById.get(String(rt.tag_id)))
+      .filter(Boolean)
+      .map((t) => ({ ...t, is_default: Boolean(t.is_default) }));
+
+    return {
+      id: record.id,
+      record,
+      images: recImages,
+      tags: recTags,
+      record_tags: recTagsList,
+    };
+  });
+
+  return new Response(JSON.stringify({ data: entries }), {
+    status: 200,
+    headers: {
+      "Content-Type": "application/json",
+      "Cache-Control": "no-store",
+    },
+  });
+}
+
 export const onRequest: PagesFunction<AppEnv> = async (context) => {
   const { request, env } = context;
   const url = new URL(request.url);
@@ -389,6 +466,9 @@ export const onRequest: PagesFunction<AppEnv> = async (context) => {
   if (pathname === "/api/images") {
     return handleImages(request, env);
   }
+  if (pathname === "/api/entries" && request.method === "GET") {
+    return handleEntriesGet(request, env);
+  }
   if (pathname === "/api/sake_images" && request.method === "POST") {
     return handleSakeImagesCreate(request, env);
   }
@@ -408,3 +488,4 @@ export const onRequest: PagesFunction<AppEnv> = async (context) => {
   const moldRequest = await prepareMoldRequest(request, env);
   return moldApp.fetch(moldRequest, mappedEnv, context as unknown as ExecutionContext);
 };
+
