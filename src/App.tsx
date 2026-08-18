@@ -332,18 +332,26 @@ export default function App() {
 
     setIsSubmitting(true);
     try {
+      let targetId: number | string | null = null;
       if (editingId) {
-        await updateSakeRecord(editingId, draft, authSession.user?.id ?? "local");
+        const updated = await updateSakeRecord(editingId, draft, authSession.user?.id ?? "local");
+        targetId = updated?.id ?? editingId;
         showToast("사케 기록이 성공적으로 수정되었습니다.");
       } else {
-        await saveSakeRecord(draft, authSession.user?.id ?? "local");
+        const created = await saveSakeRecord(draft, authSession.user?.id ?? "local");
+        targetId = created?.id ?? null;
         showToast("정갈한 사케 기록이 저장되었습니다.");
       }
 
       await refreshData();
       setDraft(createEmptyDraft());
       setEditingId(null);
-      window.location.hash = "#/logs";
+
+      if (targetId) {
+        window.location.hash = `#/logs/${targetId}`;
+      } else {
+        window.location.hash = "#/logs";
+      }
     } catch (error) {
       console.error("Save failed:", error);
       alert("기록 저장 중 오류가 발생했습니다. 다시 시도해 주세요.");
@@ -1029,13 +1037,29 @@ export default function App() {
                 </div>
               </div>
 
-              <button type="submit" className="btn-submit-action" disabled={isSubmitting}>
-                {isSubmitting
-                  ? "저장하는 중..."
-                  : editingId
-                    ? "수정 완료하기"
-                    : "사케 기록 저장하기"}
-              </button>
+              <div style={{ display: "flex", gap: "12px", marginTop: "12px" }}>
+                <button type="submit" className="btn-submit-action" disabled={isSubmitting} style={{ flex: 1 }}>
+                  {isSubmitting
+                    ? "저장하는 중..."
+                    : editingId
+                      ? "수정 완료하기"
+                      : "사케 기록 저장하기"}
+                </button>
+                {editingId && (
+                  <button
+                    type="button"
+                    className="btn-secondary"
+                    onClick={() => {
+                      setEditingId(null);
+                      setDraft(createEmptyDraft());
+                      window.location.hash = `#/logs/${editingId}`;
+                    }}
+                    style={{ padding: "0 20px" }}
+                  >
+                    취소
+                  </button>
+                )}
+              </div>
             </div>
           </div>
         </form>
