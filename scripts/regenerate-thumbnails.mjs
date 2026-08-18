@@ -3,9 +3,14 @@ import fs from "fs";
 import path from "path";
 import sharp from "sharp";
 
-const ACCOUNT_ID = "c03bc95dc19a0f1c0f22e95562a275db";
-const BUCKET = "alcohol-log-images";
+const ACCOUNT_ID = process.env.CLOUDFLARE_ACCOUNT_ID;
+const BUCKET = process.env.R2_BUCKET_NAME || "alcohol-log-images";
+const DB_NAME = process.env.D1_DATABASE_NAME || "alcohol-log";
 const TEMP_DIR = "./temp_thumbs";
+
+if (!ACCOUNT_ID) {
+  console.log("ℹ️ CLOUDFLARE_ACCOUNT_ID is not set; defaulting to wrangler active account profile.");
+}
 
 if (!fs.existsSync(TEMP_DIR)) {
   fs.mkdirSync(TEMP_DIR, { recursive: true });
@@ -13,10 +18,15 @@ if (!fs.existsSync(TEMP_DIR)) {
 
 async function main() {
   console.log("1. Fetching image list from D1...");
+  const envVars = { ...process.env };
+  if (ACCOUNT_ID) {
+    envVars.CLOUDFLARE_ACCOUNT_ID = ACCOUNT_ID;
+  }
+
   const d1Output = execSync(
-    `npx wrangler d1 execute alcohol-log --remote --command="SELECT id, image_key, thumbnail_key FROM sake_images WHERE image_key IS NOT NULL AND thumbnail_key IS NOT NULL;" --json`,
+    `npx wrangler d1 execute ${DB_NAME} --remote --command="SELECT id, image_key, thumbnail_key FROM sake_images WHERE image_key IS NOT NULL AND thumbnail_key IS NOT NULL;" --json`,
     {
-      env: { ...process.env, CLOUDFLARE_ACCOUNT_ID: ACCOUNT_ID },
+      env: envVars,
       encoding: "utf-8",
     }
   );
@@ -43,7 +53,7 @@ async function main() {
       execSync(
         `npx wrangler r2 object get "${BUCKET}/${image_key}" --file="${origTemp}" --remote`,
         {
-          env: { ...process.env, CLOUDFLARE_ACCOUNT_ID: ACCOUNT_ID },
+          env: envVars,
           stdio: "pipe",
         }
       );
@@ -65,7 +75,7 @@ async function main() {
       execSync(
         `npx wrangler r2 object put "${BUCKET}/${thumbnail_key}" --file="${thumbTemp}" --content-type="image/webp" --remote`,
         {
-          env: { ...process.env, CLOUDFLARE_ACCOUNT_ID: ACCOUNT_ID },
+          env: envVars,
           stdio: "pipe",
         }
       );
