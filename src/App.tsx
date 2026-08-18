@@ -126,6 +126,10 @@ export default function App() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const isStorageCloud = import.meta.env.VITE_STORAGE_MODE === "cloud";
+  const isStaticSite =
+    typeof window !== "undefined" &&
+    (window.location.hostname.endsWith("github.io") ||
+      window.location.hostname.includes("gitlab.io"));
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -142,6 +146,13 @@ export default function App() {
 
   // 1. Check auth session on load
   const checkAuthSession = async () => {
+    // If hosted on GitHub Pages or static host, directly activate IndexedDB local mode
+    if (isStaticSite) {
+      setAuthSession({ checked: true, authenticated: false, user: null });
+      setCloudStorageEnabled(false);
+      return;
+    }
+
     try {
       const res = await fetch(`/api/me?_=${Date.now()}`, {
         cache: "no-store",
@@ -159,7 +170,7 @@ export default function App() {
       // ignore
     }
     setAuthSession({ checked: true, authenticated: false, user: null });
-    setCloudStorageEnabled(!isStorageCloud);
+    setCloudStorageEnabled(false);
   };
 
   useEffect(() => {
@@ -176,7 +187,7 @@ export default function App() {
     return () => window.removeEventListener("hashchange", handleHashChange);
   }, []);
 
-  // 3. Load records and tags when authenticated
+  // 3. Load records and tags when authenticated or in local mode
   const refreshData = async () => {
     try {
       setIsLoadingData(true);
@@ -195,7 +206,7 @@ export default function App() {
 
   useEffect(() => {
     if (authSession.checked) {
-      if (authSession.authenticated || !isStorageCloud) {
+      if (authSession.authenticated || !isStorageCloud || isStaticSite) {
         refreshData();
       } else {
         setIsLoadingData(false);
@@ -373,7 +384,7 @@ export default function App() {
   // ----------------------------------------------------
   // RENDER 1: Anonymous Zen Minimal Landing View
   // ----------------------------------------------------
-  if (authSession.checked && isStorageCloud && !authSession.authenticated) {
+  if (authSession.checked && isStorageCloud && !isStaticSite && !authSession.authenticated) {
     return (
       <div className="zen-landing-shell">
         <div className="zen-emblem-wrap">
@@ -443,7 +454,7 @@ export default function App() {
           <span className="kanji-logo">酒</span> SAKE LOG
         </a>
         <div className="header-right">
-          {authSession.authenticated && authSession.user && (
+          {authSession.authenticated && authSession.user ? (
             <div className="user-profile-widget" title={authSession.user.email ?? ""}>
               {authSession.user.avatarUrl ? (
                 <img src={authSession.user.avatarUrl} className="user-avatar-img" alt="Avatar" />
@@ -455,7 +466,12 @@ export default function App() {
               <span className="user-name-text">
                 {authSession.user.displayName || authSession.user.email || "사용자"}
               </span>
-              <span className="sync-indicator-icon">☁️</span>
+              <span className="sync-indicator-icon" title="클라우드 실시간 동기화">☁️</span>
+            </div>
+          ) : (
+            <div className="user-profile-widget" title="브라우저 로컬 저장소(IndexedDB)에 저장됩니다.">
+              <span className="sync-indicator-icon">💾</span>
+              <span className="user-name-text">로컬 저장소</span>
             </div>
           )}
           {authSession.authenticated && (
