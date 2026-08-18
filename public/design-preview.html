@@ -1011,24 +1011,10 @@
     ==================================================== */
     .desktop-gallery-3col {
       display: grid;
-      grid-template-columns: 1fr;
-      gap: 20px;
+      grid-template-columns: repeat(auto-fill, minmax(310px, 1fr));
+      gap: 24px;
       width: 100%;
       box-sizing: border-box;
-    }
-
-    @media (min-width: 600px) {
-      .desktop-gallery-3col {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-        gap: 24px;
-      }
-    }
-
-    @media (min-width: 900px) {
-      .desktop-gallery-3col {
-        grid-template-columns: repeat(3, minmax(0, 1fr));
-        gap: 24px;
-      }
     }
 
     .collection-card {
