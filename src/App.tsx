@@ -60,7 +60,7 @@ function getStorageMode(value: string | undefined): StorageMode {
     return value as StorageMode;
   }
 
-  return "local";
+  return "cloud";
 }
 
 const STORAGE_MODE = getStorageMode(import.meta.env.VITE_STORAGE_MODE);
