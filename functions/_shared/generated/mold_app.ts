@@ -80,12 +80,16 @@ function parseDataUrl(value: string) {
   const mimeType = match[1] || 'application/octet-stream';
   const payload = match[3];
   if (match[2]) {
-    const binary = atob(payload);
-    const bytes = new Uint8Array(binary.length);
-    for (let i = 0; i < binary.length; i++) {
-      bytes[i] = binary.charCodeAt(i);
+    try {
+      const binary = atob(payload);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) {
+        bytes[i] = binary.charCodeAt(i);
+      }
+      return { bytes, mimeType };
+    } catch (e) {
+      return null;
     }
-    return { bytes, mimeType };
   }
   return { bytes: new TextEncoder().encode(decodeURIComponent(payload)), mimeType };
 }
@@ -377,9 +381,12 @@ app.post('/api/sake_images', async (c) => {
     }
   }
 
-  if (!imageKey) {
+  if (!imageKey || imageKey.startsWith('data:')) {
     const ext = (body['file_name']?.split('.').pop()) || 'jpg';
     imageKey = `images/${authUser.id}/sake/${body['record_id']}/${imageLegacyId}.${ext}`;
+  }
+  if (thumbnailKey && thumbnailKey.startsWith('data:')) {
+    thumbnailKey = `thumbnails/${authUser.id}/sake/${body['record_id']}/${imageLegacyId}.webp`;
   }
 
   const insertSql = `INSERT INTO "sake_images" ("legacy_id", "owner_id", "record_id", "image_key", "thumbnail_key", "mime_type", "file_name", "display_order", "created_at", "updated_at") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`;
