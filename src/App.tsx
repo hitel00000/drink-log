@@ -118,12 +118,21 @@ export default function App() {
   const [editingId, setEditingId] = useState<number | string | null>(null);
   const [selectedPhotoIndex, setSelectedPhotoIndex] = useState<number>(0);
   const [detailPhotoIndex, setDetailPhotoIndex] = useState<number>(0);
+  const [lightboxOpen, setLightboxOpen] = useState<boolean>(false);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const fileInputId = useId();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const isStorageCloud = import.meta.env.VITE_STORAGE_MODE === "cloud";
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setLightboxOpen(false);
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
 
   const showToast = (message: string) => {
     setToastMessage(message);
@@ -978,17 +987,32 @@ export default function App() {
       {isDetailRoute && detailRecord && (
         <div className="desktop-detail-grid">
           {/* Detail Left: Photo & Multi Thumbs */}
-          <div className="detail-hero-box">
+          <div className="detail-hero-box sticky-detail-photo">
             {detailRecord.images.length > 0 ? (
               <>
-                <img
-                  src={
-                    detailRecord.images[detailPhotoIndex]?.data_url ||
-                    detailRecord.images[0]?.data_url
-                  }
-                  className="detail-hero-img"
-                  alt={detailRecord.record.name}
-                />
+                <div
+                  className="detail-hero-img-wrap"
+                  onClick={() => setLightboxOpen(true)}
+                  title="사진 클릭하여 크게 보기"
+                >
+                  <span className="detail-photo-badge">
+                    {detailPhotoIndex === 0
+                      ? "★ 대표 사진"
+                      : `사진 ${detailPhotoIndex + 1} / ${detailRecord.images.length}`}
+                  </span>
+                  <img
+                    src={
+                      detailRecord.images[detailPhotoIndex]?.data_url ||
+                      detailRecord.images[0]?.data_url
+                    }
+                    className="detail-hero-img"
+                    alt={detailRecord.record.name}
+                  />
+                  <div className="detail-zoom-hint">
+                    <span>🔍</span>
+                    <span>크게 보기</span>
+                  </div>
+                </div>
                 {detailRecord.images.length > 1 && (
                   <div className="detail-thumb-strip">
                     {detailRecord.images.map((img, idx) => (
@@ -1022,40 +1046,48 @@ export default function App() {
                 .join(" · ") || "기본 정보 미입력"}
             </div>
 
-            {/* Pills */}
+            {/* Evaluation Verdict & Scale Pills */}
             <div className="detail-pill-row">
               {detailRecord.record.drink_again === "yes" && (
-                <span className="detail-badge-pill">✨ 다시 마신다</span>
+                <span className="mini-pill gold">✨ 다시 마신다</span>
               )}
               {detailRecord.record.drink_again === "unsure" && (
-                <span className="detail-badge-pill">잘모르겠음</span>
+                <span className="mini-pill">🤔 잘모르겠음</span>
               )}
               {detailRecord.record.drink_again === "no" && (
-                <span className="detail-badge-pill">별로</span>
+                <span className="mini-pill">💧 별로</span>
               )}
 
               {detailRecord.record.sweet_dry && (
-                <span className="detail-badge-pill">
+                <span className="mini-pill">
                   {detailRecord.record.sweet_dry === 1 && "아주 달콤함"}
                   {detailRecord.record.sweet_dry === 2 && "달콤함"}
-                  {detailRecord.record.sweet_dry === 3 && "보통"}
+                  {detailRecord.record.sweet_dry === 3 && "보통단맛"}
                   {detailRecord.record.sweet_dry === 4 && "드라이함"}
                   {detailRecord.record.sweet_dry === 5 && "아주 드라이함"}
                 </span>
               )}
 
               {detailRecord.record.aroma_intensity && (
-                <span className="detail-badge-pill">
+                <span className="mini-pill">
                   {detailRecord.record.aroma_intensity === 1 && "은은한향"}
-                  {detailRecord.record.aroma_intensity === 2 && "향 보통"}
+                  {detailRecord.record.aroma_intensity === 2 && "보통향"}
                   {detailRecord.record.aroma_intensity === 3 && "화려한향"}
                 </span>
               )}
 
+              {detailRecord.record.acidity && (
+                <span className="mini-pill">
+                  {detailRecord.record.acidity === 1 && "산미없음"}
+                  {detailRecord.record.acidity === 2 && "산미보통"}
+                  {detailRecord.record.acidity === 3 && "산미높음"}
+                </span>
+              )}
+
               {detailRecord.record.clean_umami && (
-                <span className="detail-badge-pill">
+                <span className="mini-pill">
                   {detailRecord.record.clean_umami === 1 && "깔끔함"}
-                  {detailRecord.record.clean_umami === 2 && "맛 보통"}
+                  {detailRecord.record.clean_umami === 2 && "보통"}
                   {detailRecord.record.clean_umami === 3 && "감칠맛좋은"}
                 </span>
               )}
@@ -1066,22 +1098,53 @@ export default function App() {
               <div className="detail-quote">“{detailRecord.record.one_line_note}”</div>
             )}
 
-            {/* Tags */}
+            {/* Grouped Characteristic Tags (Taste, Aroma, Mood) */}
             {detailRecord.tags.length > 0 && (
-              <div style={{ marginBottom: "20px" }}>
-                <div style={{ fontSize: "0.82rem", color: "var(--text-tertiary)", marginBottom: "8px", fontWeight: 600 }}>
-                  특성 태그
-                </div>
-                <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
-                  {detailRecord.tags.map((t) => (
-                    <span key={t.id} className="chip-item active">
-                      {t.tag_group === "taste" && "맛: "}
-                      {t.tag_group === "aroma" && "향: "}
-                      {t.tag_group === "mood" && "느낌: "}
-                      {t.label}
-                    </span>
-                  ))}
-                </div>
+              <div className="detail-tags-section">
+                {detailRecord.tags.some((t) => t.tag_group === "taste") && (
+                  <div className="detail-tag-group-row">
+                    <span className="detail-tag-group-label">맛 Taste</span>
+                    <div className="detail-tag-group-chips">
+                      {detailRecord.tags
+                        .filter((t) => t.tag_group === "taste")
+                        .map((t) => (
+                          <span key={t.id} className="chip-item active">
+                            {t.label.replace(/^맛:\s*/, "")}
+                          </span>
+                        ))}
+                    </div>
+                  </div>
+                )}
+
+                {detailRecord.tags.some((t) => t.tag_group === "aroma") && (
+                  <div className="detail-tag-group-row">
+                    <span className="detail-tag-group-label">향 Aroma</span>
+                    <div className="detail-tag-group-chips">
+                      {detailRecord.tags
+                        .filter((t) => t.tag_group === "aroma")
+                        .map((t) => (
+                          <span key={t.id} className="chip-item active">
+                            {t.label.replace(/^향:\s*/, "")}
+                          </span>
+                        ))}
+                    </div>
+                  </div>
+                )}
+
+                {detailRecord.tags.some((t) => t.tag_group === "mood") && (
+                  <div className="detail-tag-group-row">
+                    <span className="detail-tag-group-label">느낌 Mood</span>
+                    <div className="detail-tag-group-chips">
+                      {detailRecord.tags
+                        .filter((t) => t.tag_group === "mood")
+                        .map((t) => (
+                          <span key={t.id} className="chip-item active">
+                            {t.label.replace(/^느낌:\s*/, "")}
+                          </span>
+                        ))}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
@@ -1228,7 +1291,7 @@ export default function App() {
                       </div>
                       <div className="collection-badges">
                         {entry.record.drink_again === "yes" && (
-                          <span className="mini-pill gold">다시마신다</span>
+                          <span className="mini-pill gold">✨ 다시 마신다</span>
                         )}
                         {entry.tags.slice(0, 3).map((t) => (
                           <span key={t.id} className="mini-pill">
@@ -1240,9 +1303,75 @@ export default function App() {
                   </a>
                 );
               })}
+
+              {/* Ghost Slot for Adding Next Sake Record */}
+              <a href="#/" className="collection-card-add">
+                <div className="collection-card-add-icon">+</div>
+                <div className="collection-card-add-text">새로운 사케 기록하기</div>
+              </a>
             </div>
           )}
         </>
+      )}
+
+      {/* Lightbox Modal (High-Res Zoom View) */}
+      {lightboxOpen && detailRecord && detailRecord.images.length > 0 && (
+        <div className="lightbox-overlay" onClick={() => setLightboxOpen(false)}>
+          <div className="lightbox-dialog" onClick={(e) => e.stopPropagation()}>
+            <button
+              type="button"
+              className="lightbox-close-btn"
+              onClick={() => setLightboxOpen(false)}
+              title="닫기 (ESC)"
+            >
+              ✕
+            </button>
+
+            {detailRecord.images.length > 1 && (
+              <>
+                <button
+                  type="button"
+                  className="lightbox-nav-btn prev"
+                  onClick={() =>
+                    setDetailPhotoIndex((prev) =>
+                      prev > 0 ? prev - 1 : detailRecord.images.length - 1
+                    )
+                  }
+                  title="이전 사진"
+                >
+                  ‹
+                </button>
+                <button
+                  type="button"
+                  className="lightbox-nav-btn next"
+                  onClick={() =>
+                    setDetailPhotoIndex((prev) =>
+                      prev < detailRecord.images.length - 1 ? prev + 1 : 0
+                    )
+                  }
+                  title="다음 사진"
+                >
+                  ›
+                </button>
+              </>
+            )}
+
+            <img
+              src={
+                detailRecord.images[detailPhotoIndex]?.data_url ||
+                detailRecord.images[0]?.data_url
+              }
+              className="lightbox-main-img"
+              alt={detailRecord.record.name}
+            />
+
+            {detailRecord.images.length > 1 && (
+              <div className="lightbox-counter">
+                {detailPhotoIndex + 1} / {detailRecord.images.length}
+              </div>
+            )}
+          </div>
+        </div>
       )}
     </div>
   );
