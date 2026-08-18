@@ -385,7 +385,10 @@ export default function App() {
 
   // Detail item extraction
   const detailId = isDetailRoute ? route.replace("#/logs/", "") : null;
-  const detailRecord = detailId ? records.find((r) => String(r.id) === detailId) : null;
+  const detailIndex = detailId ? records.findIndex((r) => String(r.id) === detailId) : -1;
+  const detailRecord = detailIndex !== -1 ? records[detailIndex] : null;
+  const prevRecord = detailIndex > 0 ? records[detailIndex - 1] : null;
+  const nextRecord = detailIndex >= 0 && detailIndex < records.length - 1 ? records[detailIndex + 1] : null;
 
   // Edit item setup
   useEffect(() => {
@@ -1324,6 +1327,40 @@ export default function App() {
                     삭제하기
                   </button>
                 </div>
+
+                {/* Journal Flip Previous / Next Navigation */}
+                {records.length > 1 && (
+                  <div className="journal-flip-nav">
+                    {prevRecord ? (
+                      <a href={`#/logs/${prevRecord.id}`} className="journal-flip-card prev">
+                        <span className="flip-badge">‹ 이전 사케</span>
+                        <span className="flip-name">{prevRecord.record.name}</span>
+                      </a>
+                    ) : (
+                      <div className="journal-flip-card disabled">
+                        <span className="flip-badge">‹ 이전 사케</span>
+                        <span className="flip-name">첫 번째 기록</span>
+                      </div>
+                    )}
+
+                    <a href="#/logs" className="journal-flip-card list" title="전체 갤러리 목록으로">
+                      <span className="flip-badge">목록</span>
+                      <span className="flip-name">전체 갤러리</span>
+                    </a>
+
+                    {nextRecord ? (
+                      <a href={`#/logs/${nextRecord.id}`} className="journal-flip-card next">
+                        <span className="flip-badge">다음 사케 ›</span>
+                        <span className="flip-name">{nextRecord.record.name}</span>
+                      </a>
+                    ) : (
+                      <div className="journal-flip-card disabled">
+                        <span className="flip-badge">다음 사케 ›</span>
+                        <span className="flip-name">마지막 기록</span>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
           ) : (
