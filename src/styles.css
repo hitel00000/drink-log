@@ -1157,7 +1157,7 @@ body {
 ==================================================== */
 .desktop-gallery-3col {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(310px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
   gap: 24px;
   width: 100%;
   box-sizing: border-box;
