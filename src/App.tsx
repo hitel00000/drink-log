@@ -431,7 +431,7 @@ export default function App() {
             <button
               className="btn-header-logout"
               onClick={() => {
-                window.location.href = "/api/auth/logout";
+                window.location.href = "/api/auth/logout?returnTo=/";
               }}
             >
               로그아웃

@@ -132,15 +132,16 @@ export async function handleLogout(request: Request, env: AppEnv) {
 
   const url = new URL(request.url);
   const returnTo = url.searchParams.get("returnTo");
+  const acceptHeader = request.headers.get("Accept") || "";
 
   let response: Response;
-  if (returnTo) {
-    response = redirect(returnTo);
-  } else {
+  if (acceptHeader.includes("application/json") && !returnTo) {
     response = new Response(JSON.stringify({ ok: true }), {
       status: 200,
       headers: { "Cache-Control": "no-store", "Content-Type": "application/json; charset=utf-8" },
     });
+  } else {
+    response = redirect(returnTo || "/");
   }
 
   clearSessionCookies().forEach((cookie) => response.headers.append("Set-Cookie", cookie));
