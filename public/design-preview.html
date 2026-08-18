@@ -1474,10 +1474,90 @@
   </main>
 
   <!-- ====================================================
-       VIEW 3: COLLECTION GALLERY
+       VIEW 3: COLLECTION GALLERY (INTERACTIVE 1/2/3 SHOWCASE)
   ==================================================== -->
   <main id="viewList" style="display:none;">
-    <div class="desktop-gallery-3col">
+    <!-- Gallery Scenario Selector -->
+    <div style="display:flex; justify-content:center; gap:8px; margin-bottom:20px; flex-wrap:wrap;">
+      <span style="font-size:0.84rem; color:var(--text-tertiary); display:flex; align-items:center; margin-right:6px;">
+        🔍 케이스 시뮬레이터:
+      </span>
+      <button type="button" class="view-tab active" id="caseBtn1" onclick="showGalleryCase(1)" style="padding:6px 14px; font-size:0.82rem;">
+        기록 1개 있을 때
+      </button>
+      <button type="button" class="view-tab" id="caseBtn2" onclick="showGalleryCase(2)" style="padding:6px 14px; font-size:0.82rem;">
+        기록 2개 있을 때
+      </button>
+      <button type="button" class="view-tab" id="caseBtn3" onclick="showGalleryCase(3)" style="padding:6px 14px; font-size:0.82rem;">
+        기록 3개 있을 때
+      </button>
+    </div>
+
+    <!-- Case 1: 1 Item + Ghost Add Card -->
+    <div id="galleryCase1" class="desktop-gallery-3col">
+      <div class="collection-card" onclick="switchView('detail', document.querySelectorAll('.view-tab')[1])">
+        <img src="https://images.unsplash.com/photo-1582878826629-29b7ad1cdc43?w=800&auto=format&fit=crop&q=80" class="collection-card-img" alt="Dassai">
+        <div class="collection-card-body">
+          <div>
+            <div class="collection-title">닷사이 23 준마이다이긴죠</div>
+            <div class="collection-sub">야마구치현 · 2026.08.19</div>
+          </div>
+          <div class="collection-badges">
+            <span class="mini-pill gold">✨ 다시 마신다</span>
+            <span class="mini-pill">사과</span>
+            <span class="mini-pill">부드러움</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Ghost Slot Card -->
+      <div class="collection-card-add" onclick="switchView('write', document.querySelectorAll('.view-tab')[0])">
+        <div class="collection-card-add-icon">+</div>
+        <div class="collection-card-add-text">새로운 사케 기록하기</div>
+      </div>
+    </div>
+
+    <!-- Case 2: 2 Items + Ghost Add Card -->
+    <div id="galleryCase2" class="desktop-gallery-3col" style="display:none;">
+      <div class="collection-card" onclick="switchView('detail', document.querySelectorAll('.view-tab')[1])">
+        <img src="https://images.unsplash.com/photo-1582878826629-29b7ad1cdc43?w=800&auto=format&fit=crop&q=80" class="collection-card-img" alt="Dassai">
+        <div class="collection-card-body">
+          <div>
+            <div class="collection-title">닷사이 23 준마이다이긴죠</div>
+            <div class="collection-sub">야마구치현 · 2026.08.19</div>
+          </div>
+          <div class="collection-badges">
+            <span class="mini-pill gold">✨ 다시 마신다</span>
+            <span class="mini-pill">사과</span>
+            <span class="mini-pill">부드러움</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="collection-card">
+        <img src="https://images.unsplash.com/photo-1569718212165-3a8278d5f624?w=800&auto=format&fit=crop&q=80" class="collection-card-img" alt="Kubota">
+        <div class="collection-card-body">
+          <div>
+            <div class="collection-title">쿠보타 만쥬 (久保田 萬寿)</div>
+            <div class="collection-sub">니가타현 · 2026.08.12</div>
+          </div>
+          <div class="collection-badges">
+            <span class="mini-pill gold">✨ 다시 마신다</span>
+            <span class="mini-pill">깔끔함</span>
+            <span class="mini-pill">은은한향</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Ghost Slot Card -->
+      <div class="collection-card-add" onclick="switchView('write', document.querySelectorAll('.view-tab')[0])">
+        <div class="collection-card-add-icon">+</div>
+        <div class="collection-card-add-text">새로운 사케 기록하기</div>
+      </div>
+    </div>
+
+    <!-- Case 3: 3 Items + Ghost Add Card -->
+    <div id="galleryCase3" class="desktop-gallery-3col" style="display:none;">
       <div class="collection-card" onclick="switchView('detail', document.querySelectorAll('.view-tab')[1])">
         <img src="https://images.unsplash.com/photo-1582878826629-29b7ad1cdc43?w=800&auto=format&fit=crop&q=80" class="collection-card-img" alt="Dassai">
         <div class="collection-card-body">
@@ -1541,8 +1621,18 @@
 </div>
 
 <script>
+  function showGalleryCase(caseNum) {
+    document.getElementById('galleryCase1').style.display = caseNum === 1 ? 'grid' : 'none';
+    document.getElementById('galleryCase2').style.display = caseNum === 2 ? 'grid' : 'none';
+    document.getElementById('galleryCase3').style.display = caseNum === 3 ? 'grid' : 'none';
+
+    document.getElementById('caseBtn1').classList.toggle('active', caseNum === 1);
+    document.getElementById('caseBtn2').classList.toggle('active', caseNum === 2);
+    document.getElementById('caseBtn3').classList.toggle('active', caseNum === 3);
+  }
+
   function switchView(viewName, tabEl) {
-    document.querySelectorAll('.view-tab').forEach(el => el.classList.remove('active'));
+    document.querySelectorAll('.view-switcher .view-tab').forEach(el => el.classList.remove('active'));
     tabEl.classList.add('active');
 
     document.getElementById('viewWrite').style.display = viewName === 'write' ? 'block' : 'none';
