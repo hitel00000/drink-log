@@ -123,6 +123,7 @@ export default function App() {
   const [isLoadingData, setIsLoadingData] = useState<boolean>(true);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [filterDrinkAgain, setFilterDrinkAgain] = useState<DrinkAgainValue | "all">("all");
+  const [searchQuery, setSearchQuery] = useState<string>("");
   const fileInputId = useId();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -1381,37 +1382,62 @@ export default function App() {
       ==================================================== */}
       {isListRoute && (
         <>
-          {/* Quick Verdict Taste Filter Bar */}
+          {/* Quick Search & Verdict Taste Filter Bar */}
           {!isLoadingData && records.length > 0 && (
-            <div className="gallery-filter-bar">
-              <button
-                type="button"
-                className={`gallery-filter-pill ${filterDrinkAgain === "all" ? "active" : ""}`}
-                onClick={() => setFilterDrinkAgain("all")}
-              >
-                전체 <span className="pill-count">{records.length}</span>
-              </button>
-              <button
-                type="button"
-                className={`gallery-filter-pill gold ${filterDrinkAgain === "yes" ? "active" : ""}`}
-                onClick={() => setFilterDrinkAgain("yes")}
-              >
-                ✨ 다시 마신다 <span className="pill-count">{records.filter((r) => r.record.drink_again === "yes").length}</span>
-              </button>
-              <button
-                type="button"
-                className={`gallery-filter-pill ${filterDrinkAgain === "unsure" ? "active" : ""}`}
-                onClick={() => setFilterDrinkAgain("unsure")}
-              >
-                🤔 잘모르겠음 <span className="pill-count">{records.filter((r) => r.record.drink_again === "unsure").length}</span>
-              </button>
-              <button
-                type="button"
-                className={`gallery-filter-pill ${filterDrinkAgain === "no" ? "active" : ""}`}
-                onClick={() => setFilterDrinkAgain("no")}
-              >
-                💧 별로 <span className="pill-count">{records.filter((r) => r.record.drink_again === "no").length}</span>
-              </button>
+            <div className="gallery-control-header">
+              {/* Quick Search Input */}
+              <div className="gallery-search-wrap">
+                <span className="search-icon">🔍</span>
+                <input
+                  type="text"
+                  className="gallery-search-input"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="사케 이름, 지역, 양조장, 메모, 태그 검색..."
+                />
+                {searchQuery && (
+                  <button
+                    type="button"
+                    className="gallery-search-clear"
+                    onClick={() => setSearchQuery("")}
+                    title="검색어 지우기"
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
+
+              {/* Quick Verdict Taste Filter Bar */}
+              <div className="gallery-filter-bar">
+                <button
+                  type="button"
+                  className={`gallery-filter-pill ${filterDrinkAgain === "all" ? "active" : ""}`}
+                  onClick={() => setFilterDrinkAgain("all")}
+                >
+                  전체 <span className="pill-count">{records.length}</span>
+                </button>
+                <button
+                  type="button"
+                  className={`gallery-filter-pill gold ${filterDrinkAgain === "yes" ? "active" : ""}`}
+                  onClick={() => setFilterDrinkAgain("yes")}
+                >
+                  ✨ 다시 마신다 <span className="pill-count">{records.filter((r) => r.record.drink_again === "yes").length}</span>
+                </button>
+                <button
+                  type="button"
+                  className={`gallery-filter-pill ${filterDrinkAgain === "unsure" ? "active" : ""}`}
+                  onClick={() => setFilterDrinkAgain("unsure")}
+                >
+                  🤔 잘모르겠음 <span className="pill-count">{records.filter((r) => r.record.drink_again === "unsure").length}</span>
+                </button>
+                <button
+                  type="button"
+                  className={`gallery-filter-pill ${filterDrinkAgain === "no" ? "active" : ""}`}
+                  onClick={() => setFilterDrinkAgain("no")}
+                >
+                  💧 별로 <span className="pill-count">{records.filter((r) => r.record.drink_again === "no").length}</span>
+                </button>
+              </div>
             </div>
           )}
 
@@ -1452,25 +1478,55 @@ export default function App() {
               </a>
             </div>
           ) : (() => {
-            const displayRecords =
+            const filteredByVerdict =
               filterDrinkAgain === "all"
                 ? records
                 : records.filter((r) => r.record.drink_again === filterDrinkAgain);
 
+            const q = searchQuery.trim().toLowerCase();
+            const displayRecords = q
+              ? filteredByVerdict.filter((entry) => {
+                  const r = entry.record;
+                  const matchString = [
+                    r.name,
+                    r.region,
+                    r.brewery,
+                    r.rice,
+                    r.sake_type,
+                    r.place,
+                    r.one_line_note,
+                    r.food_pairing,
+                    r.companions,
+                  ]
+                    .filter(Boolean)
+                    .join(" ")
+                    .toLowerCase();
+                  const matchTags = entry.tags.map((t) => t.label).join(" ").toLowerCase();
+                  return matchString.includes(q) || matchTags.includes(q);
+                })
+              : filteredByVerdict;
+
             if (displayRecords.length === 0) {
               return (
                 <div className="empty-state-box">
-                  <div className="empty-state-icon">🏷️</div>
-                  <div className="empty-state-title">선택한 조건의 사케 기록이 없습니다</div>
+                  <div className="empty-state-icon">🔍</div>
+                  <div className="empty-state-title">검색 조건에 맞는 사케가 없습니다</div>
                   <p className="empty-state-desc">
-                    {filterDrinkAgain === "yes" && "아직 '다시 마신다'로 기록된 인생 사케가 없습니다."}
-                    {filterDrinkAgain === "unsure" && "'잘모르겠음'으로 기록된 사케가 없습니다."}
-                    {filterDrinkAgain === "no" && "'별로'로 기록된 사케가 없습니다."}
+                    {searchQuery
+                      ? `'${searchQuery}' 검색 결과가 없습니다.`
+                      : filterDrinkAgain === "yes"
+                        ? "아직 '다시 마신다'로 기록된 인생 사케가 없습니다."
+                        : filterDrinkAgain === "unsure"
+                          ? "'잘모르겠음'으로 기록된 사케가 없습니다."
+                          : "'별로'로 기록된 사케가 없습니다."}
                   </p>
                   <button
                     type="button"
                     className="btn-secondary"
-                    onClick={() => setFilterDrinkAgain("all")}
+                    onClick={() => {
+                      setFilterDrinkAgain("all");
+                      setSearchQuery("");
+                    }}
                     style={{ margin: "0 auto", padding: "8px 24px" }}
                   >
                     전체 사케 목록 보기
@@ -1492,25 +1548,32 @@ export default function App() {
                       href={`#/logs/${entry.id}`}
                       className="collection-card"
                     >
-                      {thumb ? (
-                        <img
-                          src={thumb}
-                          className="collection-card-img"
-                          alt={entry.record.name}
-                        />
-                      ) : (
-                        <div
-                          className="collection-card-img"
-                          style={{
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-                            fontSize: "2rem",
-                          }}
-                        >
-                          🍶
-                        </div>
-                      )}
+                      <div className="collection-card-img-wrap">
+                        {thumb ? (
+                          <img
+                            src={thumb}
+                            className="collection-card-img"
+                            alt={entry.record.name}
+                          />
+                        ) : (
+                          <div
+                            className="collection-card-img placeholder"
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              fontSize: "2rem",
+                            }}
+                          >
+                            🍶
+                          </div>
+                        )}
+                        {entry.record.drink_again === "yes" && (
+                          <div className="collection-card-gold-seal" title="다시 마실 인생 사케">
+                            ✨
+                          </div>
+                        )}
+                      </div>
                       <div className="collection-card-body">
                         <div>
                           <div className="collection-title">{entry.record.name}</div>
