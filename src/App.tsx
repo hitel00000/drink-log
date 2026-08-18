@@ -177,11 +177,39 @@ export default function App() {
     checkAuthSession();
   }, []);
 
-  // 2. Hash Route listener
+  const scrollPositions = useRef<Record<string, number>>({});
+  const currentRouteRef = useRef<string>(window.location.hash || "#/");
+
+  // 2. Hash Route listener with smart scroll restoration
   useEffect(() => {
     const handleHashChange = () => {
-      setRoute(window.location.hash || "#/");
-      window.scrollTo({ top: 0, behavior: "smooth" });
+      const prevRoute = currentRouteRef.current;
+      const newRoute = window.location.hash || "#/";
+
+      // Save scroll position of the previous route
+      scrollPositions.current[prevRoute] = window.scrollY;
+      currentRouteRef.current = newRoute;
+
+      setRoute(newRoute);
+
+      // Detail view or Create view -> Always scroll to top
+      if (newRoute.startsWith("#/logs/") || newRoute === "#/") {
+        window.scrollTo({ top: 0, behavior: "instant" });
+      } else if (newRoute === "#/logs") {
+        // Returning to gallery list -> Restore previous scroll position
+        const savedY = scrollPositions.current["#/logs"];
+        if (typeof savedY === "number") {
+          requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+              window.scrollTo({ top: savedY, behavior: "instant" });
+            });
+          });
+        } else {
+          window.scrollTo({ top: 0, behavior: "instant" });
+        }
+      } else {
+        window.scrollTo({ top: 0, behavior: "instant" });
+      }
     };
     window.addEventListener("hashchange", handleHashChange);
     return () => window.removeEventListener("hashchange", handleHashChange);
