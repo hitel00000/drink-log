@@ -147,6 +147,18 @@ async function ensureSessionTable(env: AppEnv) {
   await db
     .prepare("CREATE INDEX IF NOT EXISTS idx_oauth_sessions_expires_at ON oauth_sessions(expires_at)")
     .run();
+  await db
+    .prepare(
+      `CREATE TABLE IF NOT EXISTS "_mold_sessions" (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        expires_at TEXT NOT NULL
+      )`,
+    )
+    .run();
+  await db
+    .prepare('CREATE INDEX IF NOT EXISTS idx_mold_sessions_user_id ON "_mold_sessions"(user_id)')
+    .run();
 }
 
 export function createOAuthStateCookie(state: string) {
@@ -176,6 +188,17 @@ export async function createSessionCookie(env: AppEnv, userId: string) {
     )
     .bind(sessionId, userId, now.toISOString(), expiresAt.toISOString())
     .run();
+
+  try {
+    await getDatabase(env)
+      .prepare(
+        'INSERT INTO "_mold_sessions" (id, user_id, expires_at) VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET user_id = excluded.user_id, expires_at = excluded.expires_at',
+      )
+      .bind(sessionId, userId, expiresAt.toISOString())
+      .run();
+  } catch (e) {
+    // best-effort mold bridge
+  }
 
   return serializeCookie(SESSION_COOKIE, sessionId, {
     expires: expiresAt,
@@ -242,6 +265,11 @@ export async function revokeSession(request: Request, env: AppEnv) {
 
   await ensureSessionTable(env);
   await getDatabase(env).prepare("DELETE FROM oauth_sessions WHERE id = ?").bind(sessionId).run();
+  try {
+    await getDatabase(env).prepare('DELETE FROM "_mold_sessions" WHERE id = ?').bind(sessionId).run();
+  } catch (e) {
+    // best-effort
+  }
 }
 
 export function redirect(location: string, init?: ResponseInit) {

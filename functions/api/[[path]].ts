@@ -8,6 +8,7 @@ import {
   getDatabase,
   getImagesBucket,
   getOAuthState,
+  getSessionCookie,
   readSession,
   redirect,
   validateAuthEnv,
@@ -220,6 +221,42 @@ export async function handleImages(request: Request, env: AppEnv) {
   });
 }
 
+async function prepareMoldRequest(request: Request, env: AppEnv): Promise<Request> {
+  const sessionId = getSessionCookie(request);
+  if (!sessionId) {
+    return request;
+  }
+
+  const cookieHeader = request.headers.get("Cookie") || "";
+  if (cookieHeader.includes("mold_session=")) {
+    return request;
+  }
+
+  const session = await readSession(request, env);
+  if (!session) {
+    return request;
+  }
+
+  try {
+    const db = getDatabase(env);
+    await db
+      .prepare(
+        'INSERT INTO "_mold_sessions" (id, user_id, expires_at) VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET user_id = excluded.user_id, expires_at = excluded.expires_at',
+      )
+      .bind(sessionId, session.userId, new Date(session.exp * 1000).toISOString())
+      .run();
+  } catch (e) {
+    // best-effort mold bridge
+  }
+
+  const moldCookie = `mold_session=${sessionId}`;
+  const newCookie = cookieHeader ? `${cookieHeader}; ${moldCookie}` : moldCookie;
+  const newHeaders = new Headers(request.headers);
+  newHeaders.set("Cookie", newCookie);
+
+  return new Request(request, { headers: newHeaders });
+}
+
 export const onRequest: PagesFunction<AppEnv> = async (context) => {
   const { request, env } = context;
   const url = new URL(request.url);
@@ -253,5 +290,6 @@ export const onRequest: PagesFunction<AppEnv> = async (context) => {
     BUCKET: bucket,
   };
 
-  return moldApp.fetch(request, mappedEnv, context as unknown as ExecutionContext);
+  const moldRequest = await prepareMoldRequest(request, env);
+  return moldApp.fetch(moldRequest, mappedEnv, context as unknown as ExecutionContext);
 };
