@@ -26,10 +26,25 @@
 - [x] **PC / 모바일 완벽 반응형**: 데스크톱(2-Column Split 스티키 뷰 & 3열 매거진 그리드) 및 모바일(컴팩트 1열) 완벽 지원
 - [x] **제로-레코드 Zen 미니멀 랜딩 뷰**: 단 한 화면에서 본질을 전달하는 비로그인 Google 시작 뷰 구현
 
-### 마일스톤 2: 모바일 실사용 QA 및 Mold 피드백 정리
-- [ ] 모바일 브라우저(Safari, Chrome)에서의 터치 인터랙션 및 입력 사용감 점검
-- [ ] 네트워크 지연 환경에서의 이미지 업로드 및 저장 UX 개선 필요성 점검
-- [ ] Mold 프레임워크 실적용 경험 기반 개선점/피드백 정리 및 공유
+### 마일스톤 2: 모바일 실사용 QA 및 Mold 피드백 정리 (완료)
+- [x] **모바일 브라우저 터치 인터랙션 & 여백 리디자인**: 젠 랜딩 뷰 모바일 100dvh 센터링 및 시원한 패딩 적용
+- [x] **브랜딩 및 파비콘 현대화**: 레거시 위스키 아이콘 ➔ 단아한 Warm Linen `酒` 파비콘 및 애플 터치 아이콘 적용
+- [x] **배포 번들 클린업**: `*-preview.html` 개발용 파일을 `previews/` 디렉터리로 격리하여 프로덕션 빌드 번들에서 원천 제외
+- [x] **공식 문서 체계화**: `docs/DESIGN_GUIDE.md` 수립 및 `AGENTS.md`, `CONTEXT.md` 상호 참조 SSOT 지정
+- [x] **Mold 프레임워크 개선 RFC 작성**: `../mold/docs/tasks/2026-08-19-drink-log-feedback-eager-loading-and-blob-streaming.md` 피드백 문서 등록
+
+### 마일스톤 3: One-Shot Aggregate API 네트워크 통합 및 읽기/쓰기 성능 최적화 (진행 예정)
+- [ ] **Step 1: 게이트웨이 원샷 읽기 API (`GET /api/entries`)**
+  - `functions/api/[[path]].ts`에 D1 `env.DB.batch()`를 이용한 단일 왕복(Single RTT) 쿼리 및 엣지 조립 핸들러 구현
+  - `src/lib/storage.ts`의 `loadSakeRecords()`를 `GET /api/entries` 1회 호출로 전환하여 목록 로딩 4회 ➔ 1회 단축
+- [ ] **Step 2: 게이트웨이 원샷 쓰기 API (`POST /api/entries`)**
+  - `functions/api/[[path]].ts`에 신규 사진 R2 바이너리 병렬 업로드 + D1 배치 트랜잭션 일괄 저장 핸들러 구현
+  - `src/lib/storage.ts`의 `saveSakeRecord()`를 단 1회의 원자적(Atomic) 호출로 전환
+- [ ] **Step 3: 게이트웨이 원샷 수정/삭제 API (`PUT /api/entries/:id`, `DELETE /api/entries/:id`)**
+  - `functions/api/[[path]].ts`에 기존 사진 키 보존 + D1 배치 갱신/삭제 핸들러 구현
+  - `src/lib/storage.ts`의 `updateSakeRecord()` 및 `deleteSakeRecord()`를 원샷 호출로 전환
+- [ ] **Step 4: 통합 검증 및 원격 배포**
+  - 3대 검증(`typecheck`, `typecheck:functions`, `build`) 0 error 확인 및 프로덕션 배포
 
 ---
 
