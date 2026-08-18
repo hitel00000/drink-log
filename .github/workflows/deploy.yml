@@ -3,6 +3,13 @@ name: Deploy to GitHub Pages
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'resources/**'
+      - 'migrations/**'
+      - '*.sql'
+      - '.gitignore'
 
 permissions:
   contents: read
