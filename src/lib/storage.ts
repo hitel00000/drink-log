@@ -998,10 +998,28 @@ function buildSakeRecordEntry(
     .map((recordTag) => tagsById.get(recordTag.tag_id))
     .filter((tag): tag is SakeTag => Boolean(tag));
 
+  const normalizedImages = images.map((img) => ({
+    ...img,
+    data_url:
+      img.data_url ||
+      (img.image_key
+        ? img.image_key.startsWith("data:") || img.image_key.startsWith("/")
+          ? img.image_key
+          : `${CLOUD_IMAGE_SRC_PREFIX}${encodeURIComponent(img.image_key)}`
+        : ""),
+    thumbnail_data_url:
+      img.thumbnail_data_url ||
+      (img.thumbnail_key
+        ? img.thumbnail_key.startsWith("data:") || img.thumbnail_key.startsWith("/")
+          ? img.thumbnail_key
+          : `${CLOUD_IMAGE_SRC_PREFIX}${encodeURIComponent(img.thumbnail_key)}`
+        : null),
+  }));
+
   return {
     id: record.id,
     record,
-    images: [...images].sort((left, right) => left.display_order - right.display_order),
+    images: [...normalizedImages].sort((left, right) => left.display_order - right.display_order),
     tags: sortSakeTags(selectedTags),
     record_tags: recordTags,
   };
