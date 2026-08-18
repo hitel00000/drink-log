@@ -74,6 +74,22 @@ function sanitizeHTML(html: string): string {
     .replace(/javascript:[^\s"']*/gi, '#');
 }
 
+function parseDataUrl(value: string) {
+  const match = /^data:([^;,]+)?(;base64)?,(.*)$/s.exec(value);
+  if (!match) return null;
+  const mimeType = match[1] || 'application/octet-stream';
+  const payload = match[3];
+  if (match[2]) {
+    const binary = atob(payload);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) {
+      bytes[i] = binary.charCodeAt(i);
+    }
+    return { bytes, mimeType };
+  }
+  return { bytes: new TextEncoder().encode(decodeURIComponent(payload)), mimeType };
+}
+
 interface AuthUser {
   id: any;
   role: string;
@@ -334,90 +350,48 @@ app.post('/api/sake_images', async (c) => {
   }
 
   const now = new Date().toISOString();
+  const imageLegacyId = body['legacy_id'] || crypto.randomUUID();
+  let imageKey = body['image_key'] || null;
+  let thumbnailKey = body['thumbnail_key'] || null;
+
+  if (typeof imageKey === 'string' && imageKey.startsWith('data:') && c.env.BUCKET) {
+    const parsed = parseDataUrl(imageKey);
+    if (parsed) {
+      const ext = (body['file_name']?.split('.').pop()) || 'jpg';
+      const r2Key = `images/${authUser.id}/sake/${body['record_id']}/${imageLegacyId}.${ext}`;
+      await c.env.BUCKET.put(r2Key, parsed.bytes, {
+        httpMetadata: { contentType: body['mime_type'] || parsed.mimeType }
+      });
+      imageKey = r2Key;
+    }
+  }
+
+  if (typeof thumbnailKey === 'string' && thumbnailKey.startsWith('data:') && c.env.BUCKET) {
+    const parsedThumb = parseDataUrl(thumbnailKey);
+    if (parsedThumb) {
+      const r2ThumbKey = `thumbnails/${authUser.id}/sake/${body['record_id']}/${imageLegacyId}.webp`;
+      await c.env.BUCKET.put(r2ThumbKey, parsedThumb.bytes, {
+        httpMetadata: { contentType: parsedThumb.mimeType }
+      });
+      thumbnailKey = r2ThumbKey;
+    }
+  }
+
+  if (!imageKey) {
+    const ext = (body['file_name']?.split('.').pop()) || 'jpg';
+    imageKey = `images/${authUser.id}/sake/${body['record_id']}/${imageLegacyId}.${ext}`;
+  }
+
   const insertSql = `INSERT INTO "sake_images" ("legacy_id", "owner_id", "record_id", "image_key", "thumbnail_key", "mime_type", "file_name", "display_order", "created_at", "updated_at") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`;
   let created: any = null;
   try {
-    created = await c.env.DB.prepare(insertSql).bind(body['legacy_id'] !== undefined ? body['legacy_id'] : null, body['owner_id'] !== undefined ? body['owner_id'] : null, body['record_id'] !== undefined ? body['record_id'] : null, null, null, body['mime_type'] !== undefined ? body['mime_type'] : null, body['file_name'] !== undefined ? body['file_name'] : null, body['display_order'] !== undefined ? body['display_order'] : 0, now, now).first<any>();
+    created = await c.env.DB.prepare(insertSql).bind(imageLegacyId, body['owner_id'] !== undefined ? body['owner_id'] : null, body['record_id'] !== undefined ? body['record_id'] : null, imageKey, thumbnailKey, body['mime_type'] !== undefined ? body['mime_type'] : null, body['file_name'] !== undefined ? body['file_name'] : null, body['display_order'] !== undefined ? body['display_order'] : 0, now, now).first<any>();
   } catch (err: any) {
     const errMsg = String(err?.message || err);
     if (errMsg.includes('UNIQUE constraint failed') || errMsg.includes('SQLITE_CONSTRAINT')) {
       return writeError(c, 400, 'INVALID_INPUT', `unique constraint failed: ${errMsg}`);
     }
     return writeError(c, 400, 'INVALID_INPUT', errMsg);
-  }
-  if (created && formData) {
-    const uploadedBlobKeys: string[] = [];
-    let blobUploadError: any = null;
-    if (!blobUploadError) {
-      const file_image_key = formData.get('image_key');
-      if (file_image_key !== null && file_image_key !== undefined && file_image_key !== '') {
-        let fileData_image_key: any = file_image_key;
-        let mimeType_image_key = 'application/octet-stream';
-        let ext_image_key = '';
-        if (typeof file_image_key === 'object') {
-          mimeType_image_key = (file_image_key as any).type || mimeType_image_key;
-          if ((file_image_key as any).name) { ext_image_key = (file_image_key as any).name.substring((file_image_key as any).name.lastIndexOf('.')); }
-          if (typeof (file_image_key as any).stream === 'function') { fileData_image_key = (file_image_key as any).stream(); }
-        }
-        const key = `blobs/sake_images/${created.id}/image_key_${Date.now()}${ext_image_key}`;
-        try {
-          await c.env.BUCKET.put(key, fileData_image_key, { httpMetadata: { contentType: mimeType_image_key } });
-          uploadedBlobKeys.push(key);
-          await c.env.DB.prepare('UPDATE "sake_images" SET "image_key" = ? WHERE id = ?').bind(key, created.id).run();
-          created['image_key'] = key;
-        } catch (err) {
-          blobUploadError = err;
-        }
-      }
-    }
-    if (!blobUploadError) {
-      const file_thumbnail_key = formData.get('thumbnail_key');
-      if (file_thumbnail_key !== null && file_thumbnail_key !== undefined && file_thumbnail_key !== '') {
-        let fileData_thumbnail_key: any = file_thumbnail_key;
-        let mimeType_thumbnail_key = 'application/octet-stream';
-        let ext_thumbnail_key = '';
-        if (typeof file_thumbnail_key === 'object') {
-          mimeType_thumbnail_key = (file_thumbnail_key as any).type || mimeType_thumbnail_key;
-          if ((file_thumbnail_key as any).name) { ext_thumbnail_key = (file_thumbnail_key as any).name.substring((file_thumbnail_key as any).name.lastIndexOf('.')); }
-          if (typeof (file_thumbnail_key as any).stream === 'function') { fileData_thumbnail_key = (file_thumbnail_key as any).stream(); }
-        }
-        const key = `blobs/sake_images/${created.id}/thumbnail_key_${Date.now()}${ext_thumbnail_key}`;
-        try {
-          await c.env.BUCKET.put(key, fileData_thumbnail_key, { httpMetadata: { contentType: mimeType_thumbnail_key } });
-          uploadedBlobKeys.push(key);
-          await c.env.DB.prepare('UPDATE "sake_images" SET "thumbnail_key" = ? WHERE id = ?').bind(key, created.id).run();
-          created['thumbnail_key'] = key;
-        } catch (err) {
-          blobUploadError = err;
-        }
-      }
-    }
-    if (blobUploadError) {
-      // Order rationale: Execute D1 hard delete BEFORE R2 compensating deletion to ensure
-      // HTTP GET requests immediately return 404 NOT_FOUND instead of 200 OK with a broken image link
-      // (dangling reference) while R2 orphan objects are being deleted.
-      let d1RollbackFailed = false;
-      try {
-        await c.env.DB.prepare('DELETE FROM "sake_images" WHERE id = ?').bind(created.id).run();
-      } catch (rollbackErr) {
-        d1RollbackFailed = true;
-      }
-      const failedCleanupKeys: string[] = [];
-      for (const key of uploadedBlobKeys) {
-        try {
-          await c.env.BUCKET.delete(key);
-        } catch (cleanupErr) {
-          failedCleanupKeys.push(key);
-        }
-      }
-      if (failedCleanupKeys.length > 0) {
-        return writeError(c, 500, 'BLOB_ORPHAN_CLEANUP_FAILED', 'failed uploading blob; some R2 orphan objects could not be cleaned up', { orphan_keys: failedCleanupKeys, d1_rollback_failed: d1RollbackFailed });
-      } else if (d1RollbackFailed) {
-        return writeError(c, 500, 'BLOB_STORE_FAILED_RECORD_PRESERVED', 'failed uploading blob and failed rolling back record');
-      } else {
-        return writeError(c, 500, 'BLOB_STORE_FAILED', 'failed uploading blob; record creation rolled back');
-      }
-    }
   }
   return c.json({ data: sanitizeRecord(created, []) }, 201);
 });
