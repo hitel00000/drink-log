@@ -122,6 +122,7 @@ export default function App() {
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [isLoadingData, setIsLoadingData] = useState<boolean>(true);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [filterDrinkAgain, setFilterDrinkAgain] = useState<DrinkAgainValue | "all">("all");
   const fileInputId = useId();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -1343,6 +1344,40 @@ export default function App() {
       ==================================================== */}
       {isListRoute && (
         <>
+          {/* Quick Verdict Taste Filter Bar */}
+          {!isLoadingData && records.length > 0 && (
+            <div className="gallery-filter-bar">
+              <button
+                type="button"
+                className={`gallery-filter-pill ${filterDrinkAgain === "all" ? "active" : ""}`}
+                onClick={() => setFilterDrinkAgain("all")}
+              >
+                전체 <span className="pill-count">{records.length}</span>
+              </button>
+              <button
+                type="button"
+                className={`gallery-filter-pill gold ${filterDrinkAgain === "yes" ? "active" : ""}`}
+                onClick={() => setFilterDrinkAgain("yes")}
+              >
+                ✨ 다시 마신다 <span className="pill-count">{records.filter((r) => r.record.drink_again === "yes").length}</span>
+              </button>
+              <button
+                type="button"
+                className={`gallery-filter-pill ${filterDrinkAgain === "unsure" ? "active" : ""}`}
+                onClick={() => setFilterDrinkAgain("unsure")}
+              >
+                🤔 잘모르겠음 <span className="pill-count">{records.filter((r) => r.record.drink_again === "unsure").length}</span>
+              </button>
+              <button
+                type="button"
+                className={`gallery-filter-pill ${filterDrinkAgain === "no" ? "active" : ""}`}
+                onClick={() => setFilterDrinkAgain("no")}
+              >
+                💧 별로 <span className="pill-count">{records.filter((r) => r.record.drink_again === "no").length}</span>
+              </button>
+            </div>
+          )}
+
           {isLoadingData ? (
             <div className="desktop-gallery-3col">
               {[1, 2, 3].map((n) => (
@@ -1379,69 +1414,98 @@ export default function App() {
                 첫 사케 기록하기
               </a>
             </div>
-          ) : (
-            <div className="desktop-gallery-3col">
-              {records.map((entry) => {
-                const thumb =
-                  entry.images[0]?.thumbnail_data_url ||
-                  entry.images[0]?.data_url ||
-                  "";
-                return (
-                  <a
-                    key={entry.id}
-                    href={`#/logs/${entry.id}`}
-                    className="collection-card"
+          ) : (() => {
+            const displayRecords =
+              filterDrinkAgain === "all"
+                ? records
+                : records.filter((r) => r.record.drink_again === filterDrinkAgain);
+
+            if (displayRecords.length === 0) {
+              return (
+                <div className="empty-state-box">
+                  <div className="empty-state-icon">🏷️</div>
+                  <div className="empty-state-title">선택한 조건의 사케 기록이 없습니다</div>
+                  <p className="empty-state-desc">
+                    {filterDrinkAgain === "yes" && "아직 '다시 마신다'로 기록된 인생 사케가 없습니다."}
+                    {filterDrinkAgain === "unsure" && "'잘모르겠음'으로 기록된 사케가 없습니다."}
+                    {filterDrinkAgain === "no" && "'별로'로 기록된 사케가 없습니다."}
+                  </p>
+                  <button
+                    type="button"
+                    className="btn-secondary"
+                    onClick={() => setFilterDrinkAgain("all")}
+                    style={{ margin: "0 auto", padding: "8px 24px" }}
                   >
-                    {thumb ? (
-                      <img
-                        src={thumb}
-                        className="collection-card-img"
-                        alt={entry.record.name}
-                      />
-                    ) : (
-                      <div
-                        className="collection-card-img"
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          fontSize: "2rem",
-                        }}
-                      >
-                        🍶
-                      </div>
-                    )}
-                    <div className="collection-card-body">
-                      <div>
-                        <div className="collection-title">{entry.record.name}</div>
-                        <div className="collection-sub">
-                          {[entry.record.region, entry.record.consumed_date]
-                            .filter(Boolean)
-                            .join(" · ")}
+                    전체 사케 목록 보기
+                  </button>
+                </div>
+              );
+            }
+
+            return (
+              <div className="desktop-gallery-3col">
+                {displayRecords.map((entry) => {
+                  const thumb =
+                    entry.images[0]?.thumbnail_data_url ||
+                    entry.images[0]?.data_url ||
+                    "";
+                  return (
+                    <a
+                      key={entry.id}
+                      href={`#/logs/${entry.id}`}
+                      className="collection-card"
+                    >
+                      {thumb ? (
+                        <img
+                          src={thumb}
+                          className="collection-card-img"
+                          alt={entry.record.name}
+                        />
+                      ) : (
+                        <div
+                          className="collection-card-img"
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            fontSize: "2rem",
+                          }}
+                        >
+                          🍶
+                        </div>
+                      )}
+                      <div className="collection-card-body">
+                        <div>
+                          <div className="collection-title">{entry.record.name}</div>
+                          <div className="collection-sub">
+                            {[entry.record.region, entry.record.consumed_date]
+                              .filter(Boolean)
+                              .join(" · ")}
+                          </div>
+                        </div>
+                        <div className="collection-badges">
+                          {entry.record.drink_again === "yes" && (
+                            <span className="mini-pill gold">✨ 다시 마신다</span>
+                          )}
+                          {entry.tags.slice(0, 3).map((t) => (
+                            <span key={t.id} className="mini-pill">
+                              {t.label}
+                            </span>
+                          ))}
                         </div>
                       </div>
-                      <div className="collection-badges">
-                        {entry.record.drink_again === "yes" && (
-                          <span className="mini-pill gold">✨ 다시 마신다</span>
-                        )}
-                        {entry.tags.slice(0, 3).map((t) => (
-                          <span key={t.id} className="mini-pill">
-                            {t.label}
-                          </span>
-                        ))}
-                      </div>
-                    </div>
-                  </a>
-                );
-              })}
+                    </a>
+                  );
+                })}
 
-              {/* Ghost Slot for Adding Next Sake Record */}
-              <a href="#/" className="collection-card-add">
-                <div className="collection-card-add-icon">+</div>
-                <div className="collection-card-add-text">새로운 사케 기록하기</div>
-              </a>
-            </div>
-          )}
+                {/* Ghost Slot for Adding Next Sake Record */}
+                <a href="#/" className="collection-card-add">
+                  <div className="collection-card-add-icon">+</div>
+                  <div className="collection-card-add-text">새로운 사케 기록하기</div>
+                </a>
+              </div>
+            );
+          })()}
         </>
       )}
 
