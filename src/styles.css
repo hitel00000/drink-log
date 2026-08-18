@@ -191,7 +191,7 @@ body {
 .view-switcher {
   display: inline-grid;
   grid-template-columns: 1fr 1fr;
-  background: var(--bg-surface);
+  background: var(--bg-subtle);
   border: 1px solid var(--border-subtle);
   padding: 4px;
   border-radius: var(--radius-md);
@@ -216,11 +216,15 @@ body {
   display: block;
 }
 
+.view-tab:hover:not(.active) {
+  color: var(--text-primary);
+}
+
 .view-tab.active {
-  background: var(--bg-page);
+  background: var(--bg-surface);
   color: var(--text-primary);
   font-weight: 600;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+  box-shadow: 0 1px 4px rgba(45, 38, 25, 0.08);
 }
 
 /* ====================================================
