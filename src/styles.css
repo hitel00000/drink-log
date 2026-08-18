@@ -162,11 +162,6 @@ body {
   white-space: nowrap;
 }
 
-.sync-indicator-icon {
-  font-size: 0.75rem;
-  opacity: 0.85;
-}
-
 .btn-header-logout {
   background: transparent;
   border: 1px solid var(--border-subtle);

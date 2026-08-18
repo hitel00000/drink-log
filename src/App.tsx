@@ -454,7 +454,7 @@ export default function App() {
           <span className="kanji-logo">酒</span> SAKE LOG
         </a>
         <div className="header-right">
-          {authSession.authenticated && authSession.user ? (
+          {authSession.authenticated && authSession.user && (
             <div className="user-profile-widget" title={authSession.user.email ?? ""}>
               {authSession.user.avatarUrl ? (
                 <img src={authSession.user.avatarUrl} className="user-avatar-img" alt="Avatar" />
@@ -466,12 +466,6 @@ export default function App() {
               <span className="user-name-text">
                 {authSession.user.displayName || authSession.user.email || "사용자"}
               </span>
-              <span className="sync-indicator-icon" title="클라우드 실시간 동기화">☁️</span>
-            </div>
-          ) : (
-            <div className="user-profile-widget" title="브라우저 로컬 저장소(IndexedDB)에 저장됩니다.">
-              <span className="sync-indicator-icon">💾</span>
-              <span className="user-name-text">로컬 저장소</span>
             </div>
           )}
           {authSession.authenticated && (
