@@ -1329,85 +1329,100 @@ body {
 }
 
 /* ====================================================
-   ZERO-RECORD ZEN MINIMAL LANDING VIEW
+   ZERO-RECORD ZEN MINIMAL LANDING VIEW (MOBILE-NATIVE APP ONBOARDING)
 ==================================================== */
 .zen-landing-shell {
   width: 100%;
-  max-width: 520px;
-  margin: 40px auto;
+  max-width: 460px;
+  min-height: 100dvh;
+  margin: 0 auto;
+  padding: 48px 24px 64px;
   display: flex;
   flex-direction: column;
   align-items: center;
+  justify-content: center;
   text-align: center;
+  box-sizing: border-box;
 }
 
 .zen-emblem-wrap {
-  margin-bottom: 28px;
+  margin-bottom: 24px;
 }
 
 .zen-emblem-box {
-  width: 68px;
-  height: 68px;
-  border-radius: var(--radius-md);
+  width: 72px;
+  height: 72px;
+  border-radius: var(--radius-lg);
   background: var(--bg-surface);
   border: 1px solid var(--border-line);
-  box-shadow: var(--shadow-card);
+  box-shadow: 0 8px 24px -4px rgba(45, 38, 25, 0.08);
   display: flex;
   align-items: center;
   justify-content: center;
   margin: 0 auto;
+  position: relative;
+}
+
+.zen-emblem-box::after {
+  content: "";
+  position: absolute;
+  inset: -4px;
+  border-radius: calc(var(--radius-lg) + 4px);
+  border: 1px dashed rgba(150, 116, 38, 0.25);
+  pointer-events: none;
 }
 
 .zen-emblem-kanji {
   font-family: var(--font-serif);
-  font-size: 2rem;
+  font-size: 2.2rem;
   font-weight: 700;
   color: var(--gold-primary);
 }
 
 .zen-brand-subtitle {
-  font-size: 0.8rem;
+  font-size: 0.76rem;
   font-weight: 600;
-  letter-spacing: 0.2em;
+  letter-spacing: 0.18em;
   color: var(--gold-primary);
   text-transform: uppercase;
-  margin-bottom: 12px;
+  margin-bottom: 10px;
 }
 
 .zen-hero-title {
   font-family: var(--font-serif);
-  font-size: 2.15rem;
+  font-size: 1.85rem;
   font-weight: 700;
   letter-spacing: -0.01em;
   color: var(--text-primary);
-  line-height: 1.35;
-  margin-bottom: 14px;
+  line-height: 1.38;
+  margin-bottom: 12px;
 }
 
 .zen-hero-desc {
-  font-size: 0.96rem;
+  font-size: 0.92rem;
   color: var(--text-secondary);
   line-height: 1.65;
-  margin-bottom: 32px;
-  max-width: 420px;
+  margin-bottom: 28px;
+  max-width: 360px;
 }
 
 .zen-keyword-row {
   display: flex;
   justify-content: center;
   gap: 8px;
-  margin-bottom: 36px;
+  margin-bottom: 32px;
   flex-wrap: wrap;
 }
 
 .zen-keyword-pill {
-  font-size: 0.78rem;
+  font-size: 0.76rem;
   color: var(--text-secondary);
   background: var(--bg-surface);
   border: 1px solid var(--border-subtle);
-  padding: 5px 12px;
+  padding: 6px 14px;
   border-radius: var(--radius-full);
   box-shadow: 0 1px 4px rgba(45, 38, 25, 0.04);
+  font-weight: 500;
 }
 
 .zen-login-card {
@@ -1415,17 +1430,18 @@ body {
   background: var(--bg-surface);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-lg);
-  padding: 28px 24px;
+  padding: 24px 20px;
   box-shadow: var(--shadow-card);
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 12px;
+  box-sizing: border-box;
 }
 
 .btn-google-login {
   width: 100%;
-  max-width: 360px;
+  height: 50px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1433,9 +1449,8 @@ body {
   background: #ffffff;
   border: 1.5px solid var(--border-line);
   color: #1f1f1f;
-  padding: 15px 24px;
   border-radius: var(--radius-full);
-  font-size: 0.96rem;
+  font-size: 0.94rem;
   font-weight: 600;
   cursor: pointer;
   box-shadow: 0 2px 8px rgba(45, 38, 25, 0.05);
@@ -1456,7 +1471,7 @@ body {
 }
 
 .zen-helper-text {
-  font-size: 0.76rem;
+  font-size: 0.74rem;
   color: var(--text-tertiary);
 }
 
