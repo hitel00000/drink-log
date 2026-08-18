@@ -1,0 +1,51 @@
+resource:
+  name: Tag
+  table: tags
+  timestamps: true
+  soft_delete: false
+
+fields:
+  - name: legacy_id
+    type: string
+    nullable: true
+    constraints:
+      unique: true
+  - name: owner_id
+    type: string
+    nullable: true
+  - name: drink_type
+    type: string
+    nullable: false
+    default: "sake"
+  - name: tag_group
+    type: enum
+    nullable: false
+    constraints:
+      values: ["taste", "aroma", "mood"]
+  - name: label
+    type: string
+    nullable: false
+    constraints:
+      min_length: 1
+  - name: is_default
+    type: bool
+    nullable: false
+    default: false
+
+constraints:
+  unique_together:
+    - [owner_id, drink_type, tag_group, label]
+
+relations:
+  - name: owner
+    kind: belongs_to
+    target: User
+    foreign_key: owner_id
+
+auth:
+  ownership_field: owner_id
+  permissions:
+    create: authenticated
+    read: owner
+    update: owner
+    delete: owner

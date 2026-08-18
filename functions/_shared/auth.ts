@@ -82,49 +82,6 @@ function serializeCookie(name: string, value: string, options: CookieOptions = {
   return parts.join("; ");
 }
 
-async function sign(value: string, secret: string) {
-  const key = await crypto.subtle.importKey(
-    "raw",
-    new TextEncoder().encode(secret),
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    ["sign"],
-  );
-  const signature = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(value));
-  return base64UrlEncode(String.fromCharCode(...new Uint8Array(signature)));
-}
-
-async function createSignedToken(payload: SessionPayload, secret: string) {
-  const body = base64UrlEncode(JSON.stringify(payload));
-  const signature = await sign(body, secret);
-  return `${body}.${signature}`;
-}
-
-async function verifySignedToken(token: string, secret: string): Promise<SessionPayload | null> {
-  const [body, signature] = token.split(".");
-  if (!body || !signature) {
-    return null;
-  }
-
-  const expected = await sign(body, secret);
-  if (signature !== expected) {
-    return null;
-  }
-
-  let payload: SessionPayload;
-  try {
-    payload = JSON.parse(base64UrlDecode(body)) as SessionPayload;
-  } catch {
-    return null;
-  }
-
-  if (!payload.userId || payload.exp <= Math.floor(Date.now() / 1000)) {
-    return null;
-  }
-
-  return payload;
-}
-
 export function getDatabase(env: AppEnv) {
   const database = env.DB ?? env.alcohol_log;
   if (!database) {

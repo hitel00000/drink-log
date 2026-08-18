@@ -20,6 +20,9 @@ coverage/
 
 *.tsbuildinfo
 
+*.sql
+backup_*.sql
+
 .wrangler/
 
 .idea/
