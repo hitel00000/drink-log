@@ -4,7 +4,7 @@ type DrinkAgainValue = "no" | "unsure" | "yes";
 type SakeTagGroup = "taste" | "aroma" | "mood";
 
 type SakeRecord = {
-  id: string;
+  id: string | number;
   owner_id: string;
   drink_type: "sake";
   name: string;
@@ -31,9 +31,9 @@ type SakeRecord = {
 };
 
 type SakeImage = {
-  id: string;
+  id: string | number;
   owner_id: string;
-  record_id: string;
+  record_id: string | number;
   image_key: string;
   thumbnail_key: string | null;
   data_url?: string;
@@ -55,7 +55,8 @@ type SakeTag = {
 };
 
 type SakeRecordTag = {
-  record_id: string;
+  sake_record_id?: string | number;
+  record_id?: string | number;
   tag_id: string;
   created_at: string;
 };
@@ -163,7 +164,7 @@ function normalizeRecord(input: unknown, ownerId: string, existing?: SakeRecord)
   }
 
   const now = new Date().toISOString();
-  const id = normalizeRequiredText(source?.id) || existing?.id || crypto.randomUUID();
+  const id = source?.id || existing?.id || crypto.randomUUID();
   const consumedDate = normalizeRequiredText(source?.consumed_date) || now.slice(0, 10);
 
   return {
@@ -197,11 +198,11 @@ function normalizeRecord(input: unknown, ownerId: string, existing?: SakeRecord)
 function normalizeImage(
   input: Partial<SakeImage>,
   ownerId: string,
-  recordId: string,
+  recordId: string | number,
   displayOrder: number,
   existing?: SakeImage,
 ): SakeImage {
-  const id = normalizeRequiredText(input.id) || crypto.randomUUID();
+  const id = input.id || crypto.randomUUID();
   const mimeType = normalizeRequiredText(input.mime_type) || existing?.mime_type || "image/jpeg";
   const fileName = normalizeRequiredText(input.file_name) || existing?.file_name || `${id}.jpg`;
   const base = { id, file_name: fileName, mime_type: mimeType };
@@ -245,10 +246,10 @@ async function uploadImagePayload(env: AppEnv, image: SakeImage) {
   }
 }
 
-function buildEntry(record: SakeRecord, images: ImageRow[], recordTags: SakeRecordTag[], tags: SakeTag[]) {
+export function buildEntry(record: SakeRecord, images: ImageRow[], recordTags: SakeRecordTag[], tags: SakeTag[]) {
   const tagsById = new Map(tags.map((tag) => [tag.id, tag]));
   return {
-    id: record.id,
+    id: String(record.id),
     record,
     images: images
       .sort((left, right) => left.display_order - right.display_order)
@@ -265,7 +266,7 @@ function buildEntry(record: SakeRecord, images: ImageRow[], recordTags: SakeReco
   } satisfies SakeRecordEntry;
 }
 
-async function loadTagsForOwner(env: AppEnv, ownerId: string) {
+export async function loadTagsForOwner(env: AppEnv, ownerId: string) {
   const tags = await getDatabase(env)
     .prepare(
       `SELECT id, owner_id, drink_type, tag_group, label, is_default, created_at
@@ -278,11 +279,11 @@ async function loadTagsForOwner(env: AppEnv, ownerId: string) {
   return tags.results;
 }
 
-async function loadEntries(env: AppEnv, ownerId: string, recordId?: string, query?: string) {
+export async function loadEntries(env: AppEnv, ownerId: string, recordId?: string | number, query?: string) {
   const db = getDatabase(env);
   const params: unknown[] = [ownerId];
   const clauses = ["record.owner_id = ?", "record.drink_type = 'sake'"];
-  if (recordId) {
+  if (recordId !== undefined && recordId !== null) {
     clauses.push("record.id = ?");
     params.push(recordId);
   }
@@ -292,7 +293,7 @@ async function loadEntries(env: AppEnv, ownerId: string, recordId?: string, quer
       `(lower(record.name) LIKE ? OR lower(coalesce(record.region, '')) LIKE ? OR lower(coalesce(record.brewery, '')) LIKE ? OR lower(coalesce(record.sake_type, '')) LIKE ? OR lower(coalesce(record.rice, '')) LIKE ? OR lower(coalesce(record.place, '')) LIKE ? OR lower(coalesce(record.one_line_note, '')) LIKE ? OR EXISTS (
         SELECT 1 FROM record_tags rt
         JOIN tags tag ON tag.id = rt.tag_id
-        WHERE rt.record_id = record.id AND lower(tag.label) LIKE ?
+        WHERE rt.sake_record_id = record.id AND lower(tag.label) LIKE ?
       ))`,
     );
     params.push(search, search, search, search, search, search, search, search);
@@ -317,35 +318,38 @@ async function loadEntries(env: AppEnv, ownerId: string, recordId?: string, quer
     .prepare(
       `SELECT id, owner_id, record_id, image_key, thumbnail_key, mime_type, file_name, display_order, created_at
        FROM sake_images
-       WHERE owner_id = ? ${recordId ? "AND record_id = ?" : ""}
+       WHERE owner_id = ? ${recordId !== undefined && recordId !== null ? "AND record_id = ?" : ""}
        ORDER BY display_order, created_at`,
     )
-    .bind(...(recordId ? [ownerId, recordId] : [ownerId]))
+    .bind(...(recordId !== undefined && recordId !== null ? [ownerId, recordId] : [ownerId]))
     .all<ImageRow>();
 
   const recordTags = await db
     .prepare(
-      `SELECT rt.record_id, rt.tag_id, rt.created_at
+      `SELECT rt.sake_record_id, rt.tag_id, rt.created_at
        FROM record_tags rt
-       JOIN sake_records record ON record.id = rt.record_id
-       WHERE record.owner_id = ? ${recordId ? "AND record.id = ?" : ""}`,
+       JOIN sake_records record ON record.id = rt.sake_record_id
+       WHERE record.owner_id = ? ${recordId !== undefined && recordId !== null ? "AND record.id = ?" : ""}`,
     )
-    .bind(...(recordId ? [ownerId, recordId] : [ownerId]))
+    .bind(...(recordId !== undefined && recordId !== null ? [ownerId, recordId] : [ownerId]))
     .all<SakeRecordTag>();
 
   const tags = await loadTagsForOwner(env, ownerId);
-  const imagesByRecordId = new Map<string, ImageRow[]>();
+  const imagesByRecordId = new Map<string | number, ImageRow[]>();
   images.results.forEach((image) => {
     const group = imagesByRecordId.get(image.record_id) ?? [];
     group.push(image);
     imagesByRecordId.set(image.record_id, group);
   });
 
-  const tagsByRecordId = new Map<string, SakeRecordTag[]>();
+  const tagsByRecordId = new Map<string | number, SakeRecordTag[]>();
   recordTags.results.forEach((recordTag) => {
-    const group = tagsByRecordId.get(recordTag.record_id) ?? [];
-    group.push(recordTag);
-    tagsByRecordId.set(recordTag.record_id, group);
+    const recId = recordTag.sake_record_id ?? recordTag.record_id;
+    if (recId !== undefined && recId !== null) {
+      const group = tagsByRecordId.get(recId) ?? [];
+      group.push(recordTag);
+      tagsByRecordId.set(recId, group);
+    }
   });
 
   return records.results.map((record) =>
@@ -358,14 +362,14 @@ async function loadEntries(env: AppEnv, ownerId: string, recordId?: string, quer
   );
 }
 
-async function getRecordOwner(env: AppEnv, recordId: string) {
+async function getRecordOwner(env: AppEnv, recordId: string | number) {
   return getDatabase(env)
     .prepare("SELECT owner_id FROM sake_records WHERE id = ? AND drink_type = 'sake'")
     .bind(recordId)
     .first<{ owner_id: string }>();
 }
 
-async function authorizeRecordAccess(env: AppEnv, ownerId: string, recordId: string) {
+async function authorizeRecordAccess(env: AppEnv, ownerId: string, recordId: string | number) {
   const record = await getRecordOwner(env, recordId);
   if (!record) {
     return json({ error: "not_found" }, { status: 404 });
@@ -386,21 +390,21 @@ async function assertTagsAreUsable(env: AppEnv, ownerId: string, tagIds: string[
   return Array.from(new Set(tagIds.filter((tagId) => usableIds.has(tagId))));
 }
 
-async function saveRecordTags(env: AppEnv, ownerId: string, recordId: string, tagIds: string[]) {
+async function saveRecordTags(env: AppEnv, ownerId: string, recordId: string | number, tagIds: string[]) {
   const db = getDatabase(env);
   const usableTagIds = await assertTagsAreUsable(env, ownerId, tagIds);
   const now = new Date().toISOString();
-  await db.prepare("DELETE FROM record_tags WHERE record_id = ?").bind(recordId).run();
+  await db.prepare("DELETE FROM record_tags WHERE sake_record_id = ?").bind(recordId).run();
 
   for (const tagId of usableTagIds) {
     await db
-      .prepare("INSERT OR IGNORE INTO record_tags (record_id, tag_id, created_at) VALUES (?, ?, ?)")
-      .bind(recordId, tagId, now)
+      .prepare("INSERT OR IGNORE INTO record_tags (sake_record_id, tag_id, created_at, updated_at) VALUES (?, ?, ?, ?)")
+      .bind(recordId, tagId, now, now)
       .run();
   }
 }
 
-async function saveImages(env: AppEnv, ownerId: string, recordId: string, images: SakeImage[]) {
+async function saveImages(env: AppEnv, ownerId: string, recordId: string | number, images: SakeImage[]) {
   const db = getDatabase(env);
 
   for (const image of images) {
@@ -413,11 +417,10 @@ async function saveImages(env: AppEnv, ownerId: string, recordId: string, images
     await db
       .prepare(
         `INSERT INTO sake_images (
-          id, owner_id, record_id, image_key, thumbnail_key, mime_type, file_name, display_order, created_at
+          owner_id, record_id, image_key, thumbnail_key, mime_type, file_name, display_order, created_at, updated_at
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .bind(
-        image.id,
         ownerId,
         recordId,
         image.image_key,
@@ -425,6 +428,7 @@ async function saveImages(env: AppEnv, ownerId: string, recordId: string, images
         image.mime_type,
         image.file_name,
         image.display_order,
+        image.created_at,
         image.created_at,
       )
       .run();
@@ -477,7 +481,7 @@ export async function searchSakeRecords(request: Request, env: AppEnv): Promise<
   return json(await loadEntries(env, session.userId, undefined, query || undefined));
 }
 
-export async function getSakeRecord(request: Request, env: AppEnv, id: string): Promise<Response> {
+export async function getSakeRecord(request: Request, env: AppEnv, id: string | number): Promise<Response> {
   const session = await requireSession(request, env);
   if ("response" in session) {
     return session.response;
@@ -504,21 +508,15 @@ export async function createSakeRecord(request: Request, env: AppEnv): Promise<R
     return record.error;
   }
 
-  const images = getPayloadImages(payload).map((image, index) =>
-    normalizeImage(image, session.userId, record.id, index),
-  );
-  const tagIds = getPayloadTagIds(payload);
-
-  await getDatabase(env)
+  const res = await getDatabase(env)
     .prepare(
       `INSERT INTO sake_records (
-        id, owner_id, drink_type, name, region, brewery, rice, sake_type, sake_meter_value,
+        owner_id, drink_type, name, region, brewery, rice, sake_type, sake_meter_value,
         abv, volume, price, drink_again, sweet_dry, aroma_intensity, acidity, clean_umami,
         one_line_note, place, consumed_date, companions, food_pairing, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
     )
     .bind(
-      record.id,
       record.owner_id,
       record.drink_type,
       record.name,
@@ -543,14 +541,21 @@ export async function createSakeRecord(request: Request, env: AppEnv): Promise<R
       record.created_at,
       record.updated_at,
     )
-    .run();
+    .first<{ id: number }>();
 
-  await saveImages(env, session.userId, record.id, images);
-  await saveRecordTags(env, session.userId, record.id, tagIds);
-  return getSakeRecord(request, env, record.id);
+  const newRecordId = res?.id || record.id;
+
+  const images = getPayloadImages(payload).map((image, index) =>
+    normalizeImage(image, session.userId, newRecordId, index),
+  );
+  const tagIds = getPayloadTagIds(payload);
+
+  await saveImages(env, session.userId, newRecordId, images);
+  await saveRecordTags(env, session.userId, newRecordId, tagIds);
+  return getSakeRecord(request, env, newRecordId);
 }
 
-export async function updateSakeRecord(request: Request, env: AppEnv, id: string): Promise<Response> {
+export async function updateSakeRecord(request: Request, env: AppEnv, id: string | number): Promise<Response> {
   const session = await requireSession(request, env);
   if ("response" in session) {
     return session.response;
@@ -574,7 +579,6 @@ export async function updateSakeRecord(request: Request, env: AppEnv, id: string
   if ("error" in record) {
     return record.error;
   }
-  record.id = id;
 
   const existingImages = await getDatabase(env)
     .prepare(
@@ -583,12 +587,12 @@ export async function updateSakeRecord(request: Request, env: AppEnv, id: string
     )
     .bind(session.userId, id)
     .all<ImageRow>();
-  const existingById = new Map(existingImages.results.map((image) => [image.id, image as SakeImage]));
+  const existingById = new Map(existingImages.results.map((image) => [String(image.id), image as SakeImage]));
   const images = getPayloadImages(payload).map((image, index) =>
     normalizeImage(image, session.userId, id, index, existingById.get(String(image.id))),
   );
-  const nextImageIds = new Set(images.map((image) => image.id));
-  const deletedImages = existingImages.results.filter((image) => !nextImageIds.has(image.id));
+  const nextImageIds = new Set(images.map((image) => String(image.id)));
+  const deletedImages = existingImages.results.filter((image) => !nextImageIds.has(String(image.id)));
 
   await getDatabase(env)
     .prepare(
@@ -636,7 +640,7 @@ export async function updateSakeRecord(request: Request, env: AppEnv, id: string
   return getSakeRecord(request, env, id);
 }
 
-export async function deleteSakeRecord(request: Request, env: AppEnv, id: string): Promise<Response> {
+export async function deleteSakeRecord(request: Request, env: AppEnv, id: string | number): Promise<Response> {
   const session = await requireSession(request, env);
   if ("response" in session) {
     return session.response;
@@ -652,6 +656,8 @@ export async function deleteSakeRecord(request: Request, env: AppEnv, id: string
     .prepare("SELECT image_key, thumbnail_key FROM sake_images WHERE owner_id = ? AND record_id = ?")
     .bind(session.userId, id)
     .all<{ image_key: string; thumbnail_key: string | null }>();
+  await db.prepare("DELETE FROM record_tags WHERE sake_record_id = ?").bind(id).run();
+  await db.prepare("DELETE FROM sake_images WHERE owner_id = ? AND record_id = ?").bind(session.userId, id).run();
   await db.prepare("DELETE FROM sake_records WHERE owner_id = ? AND id = ?").bind(session.userId, id).run();
   await Promise.all(
     images.results.flatMap((image) =>
@@ -662,7 +668,7 @@ export async function deleteSakeRecord(request: Request, env: AppEnv, id: string
   return new Response(null, { status: 204 });
 }
 
-export async function addSakeRecordImage(request: Request, env: AppEnv, recordId: string): Promise<Response> {
+export async function addSakeRecordImage(request: Request, env: AppEnv, recordId: string | number): Promise<Response> {
   const session = await requireSession(request, env);
   if ("response" in session) {
     return session.response;
@@ -680,14 +686,13 @@ export async function addSakeRecordImage(request: Request, env: AppEnv, recordId
     .first<{ max_order: number | null }>();
   const image = normalizeImage(payload, session.userId, recordId, (maxOrder?.max_order ?? -1) + 1);
   await uploadImagePayload(env, image);
-  await getDatabase(env)
+  const res = await getDatabase(env)
     .prepare(
       `INSERT INTO sake_images (
-        id, owner_id, record_id, image_key, thumbnail_key, mime_type, file_name, display_order, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        owner_id, record_id, image_key, thumbnail_key, mime_type, file_name, display_order, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
     )
     .bind(
-      image.id,
       session.userId,
       recordId,
       image.image_key,
@@ -696,17 +701,19 @@ export async function addSakeRecordImage(request: Request, env: AppEnv, recordId
       image.file_name,
       image.display_order,
       image.created_at,
+      image.created_at,
     )
-    .run();
+    .first<{ id: number }>();
 
-  return json({ ...image, data_url: imageUrl(image.image_key), thumbnail_data_url: image.thumbnail_key ? imageUrl(image.thumbnail_key) : null }, { status: 201 });
+  const newImgId = res?.id || image.id;
+  return json({ ...image, id: newImgId, data_url: imageUrl(image.image_key), thumbnail_data_url: image.thumbnail_key ? imageUrl(image.thumbnail_key) : null }, { status: 201 });
 }
 
 export async function deleteSakeRecordImage(
   request: Request,
   env: AppEnv,
-  recordId: string,
-  imageId: string,
+  recordId: string | number,
+  imageId: string | number,
 ): Promise<Response> {
   const session = await requireSession(request, env);
   if ("response" in session) {

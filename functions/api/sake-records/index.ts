@@ -1,8 +1,8 @@
-import { fetchSakeRecordsEntry, createSakeRecordEntry } from "../../_shared/glue";
+import { createSakeRecord, listSakeRecords } from "../../_shared/sake";
 import type { AppEnv } from "../../_shared/auth";
 
-export const onRequestGet: PagesFunction<AppEnv> = async ({ env, request, executionCtx }) =>
-  fetchSakeRecordsEntry(request, env, executionCtx);
+export const onRequestGet: PagesFunction<AppEnv> = async ({ env, request }) =>
+  listSakeRecords(request, env);
 
-export const onRequestPost: PagesFunction<AppEnv> = async ({ env, request, executionCtx }) =>
-  createSakeRecordEntry(request, env, executionCtx);
+export const onRequestPost: PagesFunction<AppEnv> = async ({ env, request }) =>
+  createSakeRecord(request, env);

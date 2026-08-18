@@ -82,49 +82,6 @@ function serializeCookie(name: string, value: string, options: CookieOptions = {
   return parts.join("; ");
 }
 
-async function sign(value: string, secret: string) {
-  const key = await crypto.subtle.importKey(
-    "raw",
-    new TextEncoder().encode(secret),
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    ["sign"],
-  );
-  const signature = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(value));
-  return base64UrlEncode(String.fromCharCode(...new Uint8Array(signature)));
-}
-
-async function createSignedToken(payload: SessionPayload, secret: string) {
-  const body = base64UrlEncode(JSON.stringify(payload));
-  const signature = await sign(body, secret);
-  return `${body}.${signature}`;
-}
-
-async function verifySignedToken(token: string, secret: string): Promise<SessionPayload | null> {
-  const [body, signature] = token.split(".");
-  if (!body || !signature) {
-    return null;
-  }
-
-  const expected = await sign(body, secret);
-  if (signature !== expected) {
-    return null;
-  }
-
-  let payload: SessionPayload;
-  try {
-    payload = JSON.parse(base64UrlDecode(body)) as SessionPayload;
-  } catch {
-    return null;
-  }
-
-  if (!payload.userId || payload.exp <= Math.floor(Date.now() / 1000)) {
-    return null;
-  }
-
-  return payload;
-}
-
 export function getDatabase(env: AppEnv) {
   const database = env.DB ?? env.alcohol_log;
   if (!database) {
@@ -168,7 +125,7 @@ export function getOAuthState(request: Request) {
 }
 
 export function getSessionCookie(request: Request) {
-  return getCookie(request, "mold_session") || getCookie(request, SESSION_COOKIE);
+  return getCookie(request, SESSION_COOKIE);
 }
 
 async function ensureSessionTable(env: AppEnv) {
@@ -257,26 +214,10 @@ export async function readSession(request: Request, env: AppEnv) {
   }
 
   await ensureSessionTable(env);
-  let session = await getDatabase(env)
+  const session = await getDatabase(env)
     .prepare("SELECT user_id, expires_at FROM oauth_sessions WHERE id = ?")
     .bind(sessionId)
     .first<SessionRow>();
-
-  if (!session) {
-    const moldSession = await getDatabase(env)
-      .prepare("SELECT user_id, expires_at FROM _mold_sessions WHERE id = ?")
-      .bind(sessionId)
-      .first<{ user_id: number; expires_at: string }>();
-    if (moldSession) {
-      const user = await getDatabase(env)
-        .prepare("SELECT legacy_id FROM users WHERE id = ?")
-        .bind(moldSession.user_id)
-        .first<{ legacy_id: string }>();
-      if (user) {
-        session = { user_id: user.legacy_id, expires_at: moldSession.expires_at };
-      }
-    }
-  }
 
   if (!session) {
     return null;
