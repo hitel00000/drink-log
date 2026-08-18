@@ -755,12 +755,12 @@ export async function saveSakeRecord(
 
       for (const imgDraft of draft.images) {
         const imgBody = {
-          record_id: createdRecordId,
+          record_id: Number(createdRecordId),
           image_key: imgDraft.data_url,
           thumbnail_key: imgDraft.thumbnail_data_url || null,
-          mime_type: imgDraft.mime_type,
-          file_name: imgDraft.file_name,
-          display_order: imgDraft.display_order,
+          mime_type: imgDraft.mime_type || "image/jpeg",
+          file_name: imgDraft.file_name || "photo.jpg",
+          display_order: Number(imgDraft.display_order ?? 0),
         };
         const createdImg = await cloudFetchData<SakeImage>(CLOUD_SAKE_IMAGES_PATH, {
           method: "POST",
@@ -904,12 +904,12 @@ export async function updateSakeRecord(
 
     for (const imgDraft of draft.images) {
       const imgBody = {
-        record_id: id,
+        record_id: Number(id),
         image_key: imgDraft.data_url,
         thumbnail_key: imgDraft.thumbnail_data_url || null,
-        mime_type: imgDraft.mime_type,
-        file_name: imgDraft.file_name,
-        display_order: imgDraft.display_order,
+        mime_type: imgDraft.mime_type || "image/jpeg",
+        file_name: imgDraft.file_name || "photo.jpg",
+        display_order: Number(imgDraft.display_order ?? 0),
       };
       await cloudFetchData<SakeImage>(CLOUD_SAKE_IMAGES_PATH, {
         method: "POST",

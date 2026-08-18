@@ -202,6 +202,17 @@ function parseDataUrl(value: string) {
   return { bytes: new TextEncoder().encode(decodeURIComponent(payload)), mimeType };
 }
 
+function extractR2Key(val: string | null | undefined): string | null {
+  if (!val || typeof val !== "string") return null;
+  if (val.startsWith("/api/images?key=")) {
+    return decodeURIComponent(val.replace("/api/images?key=", ""));
+  }
+  if (val.startsWith("images/") || val.startsWith("thumbnails/") || val.startsWith("blobs/")) {
+    return val;
+  }
+  return null;
+}
+
 export async function handleSakeImagesCreate(request: Request, env: AppEnv) {
   const session = await readSession(request, env);
   if (!session) {
@@ -235,15 +246,20 @@ export async function handleSakeImagesCreate(request: Request, env: AppEnv) {
   const imageId = crypto.randomUUID();
   const ext = fileName.includes(".") ? fileName.substring(fileName.lastIndexOf(".")) : ".jpg";
 
-  const imageKey = `images/${session.userId}/sake/${recordId}/${imageId}${ext}`;
-  const thumbnailKey = `thumbnails/${session.userId}/sake/${recordId}/${imageId}.webp`;
-
   const bucket = getImagesBucket(env);
+
+  // Check if this is an existing image key or a new base64 data upload
+  const existingImageKey = extractR2Key(body.image_key);
+  const existingThumbKey = extractR2Key(body.thumbnail_key);
+
+  let imageKey = existingImageKey ?? `images/${session.userId}/sake/${recordId}/${imageId}${ext}`;
+  let thumbnailKey = existingThumbKey ?? `thumbnails/${session.userId}/sake/${recordId}/${imageId}.webp`;
 
   // 1. Upload original to R2 if provided as Data URL
   if (typeof body.image_key === "string" && body.image_key.startsWith("data:")) {
     const orig = parseDataUrl(body.image_key);
     if (orig) {
+      imageKey = `images/${session.userId}/sake/${recordId}/${imageId}${ext}`;
       await bucket.put(imageKey, orig.bytes, {
         httpMetadata: { contentType: mimeType || orig.mimeType },
       });
@@ -254,6 +270,7 @@ export async function handleSakeImagesCreate(request: Request, env: AppEnv) {
   if (typeof body.thumbnail_key === "string" && body.thumbnail_key.startsWith("data:")) {
     const thumb = parseDataUrl(body.thumbnail_key);
     if (thumb) {
+      thumbnailKey = `thumbnails/${session.userId}/sake/${recordId}/${imageId}.webp`;
       await bucket.put(thumbnailKey, thumb.bytes, {
         httpMetadata: { contentType: "image/webp" },
       });
