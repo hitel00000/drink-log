@@ -861,6 +861,21 @@ export async function updateSakeRecord(
   ownerId: number | string = LOCAL_OWNER_ID,
 ): Promise<SakeRecordEntry> {
   if (cloudStorageEnabled) {
+    try {
+      const entry = await cloudFetchData<SakeRecordEntry>(
+        `${CLOUD_ENTRIES_PATH}/${encodeURIComponent(String(id))}`,
+        {
+          method: "PUT",
+          body: JSON.stringify(draft),
+        },
+      );
+      if (entry && entry.id) {
+        return entry;
+      }
+    } catch (err) {
+      console.warn("One-shot PUT /api/entries/:id failed, falling back to legacy update:", err);
+    }
+
     const recordBody = {
       name: draft.name.trim(),
       region: draft.region.trim() || null,
@@ -978,7 +993,6 @@ export async function updateSakeRecord(
           ...existingImages
             .filter((image) => !nextImageIds.has(image.id))
             .map((image) => requestToPromise(stores[SAKE_IMAGES_STORE].delete(image.id))),
-          ...images.map((image) => requestToPromise(stores[SAKE_IMAGES_STORE].put(image))),
           ...existingRecordTags
             .filter((recordTag) => !nextTagIds.has(recordTag.tag_id))
             .map((recordTag) =>
@@ -986,9 +1000,8 @@ export async function updateSakeRecord(
                 stores[SAKE_RECORD_TAGS_STORE].delete([recordTag.record_id ?? recordTag.sake_record_id, recordTag.tag_id]),
               ),
             ),
-          ...recordTags.map((recordTag) =>
-            requestToPromise(stores[SAKE_RECORD_TAGS_STORE].put(recordTag)),
-          ),
+          ...images.map((image) => requestToPromise(stores[SAKE_IMAGES_STORE].put(image))),
+          ...recordTags.map((recordTag) => requestToPromise(stores[SAKE_RECORD_TAGS_STORE].put(recordTag))),
         ]);
 
         const tags = await getAllFromStore<SakeTag>(stores[SAKE_TAGS_STORE]);
@@ -1005,6 +1018,15 @@ export async function deleteSakeRecord(
   ownerId: number | string = LOCAL_OWNER_ID,
 ): Promise<void> {
   if (cloudStorageEnabled) {
+    try {
+      await cloudRequest<void>(`${CLOUD_ENTRIES_PATH}/${encodeURIComponent(String(id))}`, {
+        method: "DELETE",
+      });
+      return;
+    } catch (err) {
+      console.warn("One-shot DELETE /api/entries/:id failed, falling back to legacy delete:", err);
+    }
+
     const [existingImages, existingRecordTags] = await Promise.all([
       fetchAllPages<SakeImage>(CLOUD_SAKE_IMAGES_PATH),
       fetchAllPages<SakeRecordTag>(CLOUD_RECORD_TAGS_PATH),

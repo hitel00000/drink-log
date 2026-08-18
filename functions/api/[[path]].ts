@@ -679,6 +679,297 @@ export async function handleEntriesCreate(request: Request, env: AppEnv) {
   });
 }
 
+export async function handleEntriesUpdate(request: Request, env: AppEnv, recordId: number) {
+  const session = await readSession(request, env);
+  if (!session) {
+    return new Response(JSON.stringify({ error: "Unauthorized" }), {
+      status: 401,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  const db = getDatabase(env);
+  const existingRecord = await db
+    .prepare(`SELECT * FROM sake_records WHERE id = ?`)
+    .bind(recordId)
+    .first<any>();
+
+  if (!existingRecord) {
+    return new Response(JSON.stringify({ error: "Record not found" }), {
+      status: 404,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  if (existingRecord.owner_id !== session.userId) {
+    return new Response(JSON.stringify({ error: "Forbidden" }), {
+      status: 403,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  let draft: any;
+  try {
+    draft = await request.json();
+  } catch (e) {
+    return new Response(JSON.stringify({ error: "Invalid JSON body" }), {
+      status: 400,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  const name = typeof draft.name === "string" ? draft.name.trim() : "";
+  if (!name) {
+    return new Response(JSON.stringify({ error: "name is required" }), {
+      status: 400,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  const bucket = getImagesBucket(env);
+  const now = new Date().toISOString();
+  const uploadedR2Keys: string[] = [];
+
+  // 1. Process and upload images to R2 (preserving existing R2 keys)
+  const processedImages: any[] = [];
+  const rawImages = Array.isArray(draft.images) ? draft.images : [];
+  for (let i = 0; i < rawImages.length; i++) {
+    const img = rawImages[i];
+    const imageId = crypto.randomUUID();
+    const fileName = typeof img.file_name === "string" ? img.file_name.trim() : `photo_${i + 1}.jpg`;
+    const mimeType = typeof img.mime_type === "string" ? img.mime_type.trim() : "image/jpeg";
+    const ext = fileName.includes(".") ? fileName.substring(fileName.lastIndexOf(".")) : ".jpg";
+    const displayOrder = typeof img.display_order === "number" ? img.display_order : i;
+
+    let imageKey = extractR2Key(img.data_url || img.image_key);
+    let thumbnailKey = extractR2Key(img.thumbnail_data_url || img.thumbnail_key);
+
+    const dataUrl = img.data_url || img.image_key;
+    if (typeof dataUrl === "string" && dataUrl.startsWith("data:")) {
+      const parsed = parseDataUrl(dataUrl);
+      if (parsed) {
+        imageKey = `images/${session.userId}/sake/${recordId}/${imageId}${ext}`;
+        try {
+          await bucket.put(imageKey, parsed.bytes, {
+            httpMetadata: { contentType: mimeType || parsed.mimeType },
+          });
+          uploadedR2Keys.push(imageKey);
+        } catch (err) {
+          console.error("Failed to put image to R2:", err);
+        }
+      }
+    }
+
+    const thumbUrl = img.thumbnail_data_url || img.thumbnail_key;
+    if (typeof thumbUrl === "string" && thumbUrl.startsWith("data:")) {
+      const parsedThumb = parseDataUrl(thumbUrl);
+      if (parsedThumb) {
+        thumbnailKey = `thumbnails/${session.userId}/sake/${recordId}/${imageId}.webp`;
+        try {
+          await bucket.put(thumbnailKey, parsedThumb.bytes, {
+            httpMetadata: { contentType: "image/webp" },
+          });
+          uploadedR2Keys.push(thumbnailKey);
+        } catch (err) {
+          console.error("Failed to put thumbnail to R2:", err);
+        }
+      }
+    }
+
+    processedImages.push({
+      imageKey,
+      thumbnailKey,
+      fileName,
+      mimeType,
+      displayOrder,
+    });
+  }
+
+  // 2. D1 Batch Atomic Update
+  const batchStatements: any[] = [
+    db
+      .prepare(
+        `UPDATE sake_records SET
+          name = ?, region = ?, brewery = ?, rice = ?, sake_type = ?, sake_meter_value = ?,
+          abv = ?, volume = ?, price = ?, drink_again = ?, sweet_dry = ?, aroma_intensity = ?,
+          acidity = ?, clean_umami = ?, one_line_note = ?, place = ?, consumed_date = ?,
+          companions = ?, food_pairing = ?, updated_at = ?
+        WHERE id = ? AND owner_id = ?`,
+      )
+      .bind(
+        name,
+        typeof draft.region === "string" ? draft.region.trim() || null : null,
+        typeof draft.brewery === "string" ? draft.brewery.trim() || null : null,
+        typeof draft.rice === "string" ? draft.rice.trim() || null : null,
+        typeof draft.sake_type === "string" ? draft.sake_type.trim() || null : null,
+        typeof draft.sake_meter_value === "string" ? draft.sake_meter_value.trim() || null : null,
+        typeof draft.abv === "string" ? draft.abv.trim() || null : null,
+        typeof draft.volume === "string" ? draft.volume.trim() || null : null,
+        typeof draft.price === "string" ? draft.price.trim() || null : null,
+        draft.drink_again || null,
+        typeof draft.sweet_dry === "number" ? draft.sweet_dry : null,
+        typeof draft.aroma_intensity === "number" ? draft.aroma_intensity : null,
+        typeof draft.acidity === "number" ? draft.acidity : null,
+        typeof draft.clean_umami === "number" ? draft.clean_umami : null,
+        typeof draft.one_line_note === "string" ? draft.one_line_note.trim() || null : null,
+        typeof draft.place === "string" ? draft.place.trim() || null : null,
+        draft.consumed_date || now.split("T")[0],
+        typeof draft.companions === "string" ? draft.companions.trim() || null : null,
+        typeof draft.food_pairing === "string" ? draft.food_pairing.trim() || null : null,
+        now,
+        recordId,
+        session.userId,
+      ),
+    db.prepare(`DELETE FROM sake_images WHERE record_id = ? AND owner_id = ?`).bind(recordId, session.userId),
+    db.prepare(`DELETE FROM record_tags WHERE sake_record_id = ?`).bind(recordId),
+  ];
+
+  for (const img of processedImages) {
+    batchStatements.push(
+      db
+        .prepare(
+          `INSERT INTO sake_images (owner_id, record_id, image_key, thumbnail_key, mime_type, file_name, display_order, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .bind(
+          session.userId,
+          recordId,
+          img.imageKey,
+          img.thumbnailKey,
+          img.mimeType,
+          img.fileName,
+          img.displayOrder,
+          now,
+          now,
+        ),
+    );
+  }
+
+  const selectedTagIds = Array.isArray(draft.selected_tag_ids) ? draft.selected_tag_ids : [];
+  for (const tagId of selectedTagIds) {
+    batchStatements.push(
+      db
+        .prepare(`INSERT INTO record_tags (sake_record_id, tag_id, created_at, updated_at) VALUES (?, ?, ?, ?)` )
+        .bind(recordId, String(tagId), now, now),
+    );
+  }
+
+  try {
+    await db.batch(batchStatements);
+  } catch (err: any) {
+    await Promise.all(uploadedR2Keys.map((k) => bucket.delete(k).catch(() => {})));
+    return new Response(JSON.stringify({ error: "Failed to update entry: " + (err.message || err) }), {
+      status: 500,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  // 3. Fetch updated record & tag metadata to build response
+  const updatedRecord = await db.prepare(`SELECT * FROM sake_records WHERE id = ?`).bind(recordId).first<any>();
+  const allTagsRes = await db
+    .prepare(`SELECT * FROM tags WHERE drink_type = 'sake' AND (owner_id IS NULL OR owner_id = ?)`)
+    .bind(session.userId)
+    .all();
+  const allTags = (allTagsRes.results || []) as any[];
+  const tagsById = new Map<string, any>(allTags.map((t) => [String(t.id), t]));
+
+  const builtImages = processedImages.map((img, idx) => ({
+    id: idx + 1,
+    owner_id: session.userId,
+    record_id: recordId,
+    image_key: img.imageKey,
+    thumbnail_key: img.thumbnailKey,
+    mime_type: img.mimeType,
+    file_name: img.fileName,
+    display_order: img.displayOrder,
+    data_url: img.imageKey ? `/api/images?key=${encodeURIComponent(img.imageKey)}` : null,
+    thumbnail_data_url: img.thumbnailKey ? `/api/images?key=${encodeURIComponent(img.thumbnailKey)}` : null,
+    created_at: now,
+    updated_at: now,
+  }));
+
+  const builtTags = selectedTagIds
+    .map((tid: any) => tagsById.get(String(tid)))
+    .filter(Boolean)
+    .map((t: any) => ({ ...t, is_default: Boolean(t.is_default) }));
+
+  const builtRecordTags = selectedTagIds.map((tid: any) => ({
+    sake_record_id: recordId,
+    tag_id: String(tid),
+    created_at: now,
+  }));
+
+  const entry = {
+    id: recordId,
+    record: updatedRecord,
+    images: builtImages,
+    tags: builtTags,
+    record_tags: builtRecordTags,
+  };
+
+  return new Response(JSON.stringify({ data: entry }), {
+    status: 200,
+    headers: {
+      "Content-Type": "application/json",
+      "Cache-Control": "no-store",
+    },
+  });
+}
+
+export async function handleEntriesDelete(request: Request, env: AppEnv, recordId: number) {
+  const session = await readSession(request, env);
+  if (!session) {
+    return new Response(JSON.stringify({ error: "Unauthorized" }), {
+      status: 401,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  const db = getDatabase(env);
+  const existingRecord = await db
+    .prepare(`SELECT * FROM sake_records WHERE id = ?`)
+    .bind(recordId)
+    .first<any>();
+
+  if (!existingRecord) {
+    return new Response(JSON.stringify({ error: "Record not found" }), {
+      status: 404,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  if (existingRecord.owner_id !== session.userId) {
+    return new Response(JSON.stringify({ error: "Forbidden" }), {
+      status: 403,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  // Find images to delete from R2
+  const imagesRes = await db
+    .prepare(`SELECT image_key, thumbnail_key FROM sake_images WHERE record_id = ? AND owner_id = ?`)
+    .bind(recordId, session.userId)
+    .all<any>();
+  const images = imagesRes.results || [];
+
+  const bucket = getImagesBucket(env);
+  for (const img of images) {
+    if (img.image_key) bucket.delete(img.image_key).catch(() => {});
+    if (img.thumbnail_key) bucket.delete(img.thumbnail_key).catch(() => {});
+  }
+
+  await db.batch([
+    db.prepare(`DELETE FROM record_tags WHERE sake_record_id = ?`).bind(recordId),
+    db.prepare(`DELETE FROM sake_images WHERE record_id = ? AND owner_id = ?`).bind(recordId, session.userId),
+    db.prepare(`DELETE FROM sake_records WHERE id = ? AND owner_id = ?`).bind(recordId, session.userId),
+  ]);
+
+  return new Response(JSON.stringify({ success: true }), {
+    status: 200,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
 export const onRequest: PagesFunction<AppEnv> = async (context) => {
   const { request, env } = context;
   const url = new URL(request.url);
@@ -705,6 +996,18 @@ export const onRequest: PagesFunction<AppEnv> = async (context) => {
   if (pathname === "/api/entries" && request.method === "POST") {
     return handleEntriesCreate(request, env);
   }
+  
+  const entriesMatch = pathname.match(/^\/api\/entries\/(\d+)$/);
+  if (entriesMatch) {
+    const entryId = Number(entriesMatch[1]);
+    if (request.method === "PUT") {
+      return handleEntriesUpdate(request, env, entryId);
+    }
+    if (request.method === "DELETE") {
+      return handleEntriesDelete(request, env, entryId);
+    }
+  }
+
   if (pathname === "/api/sake_images" && request.method === "POST") {
     return handleSakeImagesCreate(request, env);
   }
@@ -724,4 +1027,5 @@ export const onRequest: PagesFunction<AppEnv> = async (context) => {
   const moldRequest = await prepareMoldRequest(request, env);
   return moldApp.fetch(moldRequest, mappedEnv, context as unknown as ExecutionContext);
 };
+
 
