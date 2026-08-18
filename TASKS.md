@@ -161,6 +161,19 @@ Phase 12 완료 메모:
 - Functions 타입체크 0 에러를 달성하여 Cloudflare 배포 파이프라인의 타입 안정성을 확보했다.
 - 미사용 레거시 파일 6개를 정리하고 `src/lib/storage.ts`를 사케 전용으로 경량화하여 번들 크기를 줄였다.
 
+## Phase 13 - 문서 체계 현대화 및 지식 영속화
+
+- [x] `CONTEXT.md`를 단일 진실 공급원(Single Source of Truth)으로 신규 수립.
+- [x] `AGENTS.md`의 시점 문구(과거 5월 여행 등)를 일반화하고 Mold Native 제약 규칙 추가.
+- [x] 기존 기획서(`PROJECT.md`, `PROJECT_SAKE_REVISED.md`)를 `docs/archive/`로 이동하여 아카이빙.
+- [x] `README.md`를 현재 사케 MVP 및 검증 명령어로 최신화.
+
+Phase 13 완료 메모:
+
+- 시스템 아키텍처, Mold Native 세션 브릿지, D1/R2 구성 및 데이터 모델을 `CONTEXT.md`에 일원화하여 영속화했다.
+- AI 에이전트 작업 지침(`AGENTS.md`)의 판단 기준을 모바일 사케 테이스팅 경험 중심으로 갱신했다.
+- 프로젝트 루트를 깔끔하게 정돈하고 개발/검증 진입점을 명확히 했다.
+
 ## MVP 이후로 미룰 것
 
 - [ ] OCR.
