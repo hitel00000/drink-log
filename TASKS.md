@@ -147,6 +147,20 @@ Phase 11 완료 메모:
 - service worker는 새로 등록하지 않고, 기존 registration과 Cache Storage를
   best-effort로 정리하는 현재 코드 경로를 확인했다.
 
+## Phase 12 - API 세션 연동 정비, Functions 타입체크 통과 및 레거시 정리
+
+- [x] `mold_app.ts`에서 Google OAuth 세션 쿠키(`alcohol_log_session`)와 `oauth_sessions` 테이블 연동.
+- [x] `mold_app.ts` 내부 미선언 변수 `insertSql` 런타임/컴파일 에러 해결.
+- [x] `@cloudflare/workers-types` 추가 및 `functions/` 전체 타입체크 통과 (`npm run typecheck:functions`).
+- [x] 사케 MVP에 사용되지 않는 이전 위스키/주류 컴포넌트, 데이터 및 `storage.ts` 레거시 함수 정리.
+- [x] `npm run typecheck`, `npm run typecheck:functions`, `npm run build` 전체 무결성 검증.
+
+Phase 12 완료 메모:
+
+- Google OAuth 로그인 상태에서 D1 REST API 호출 시 사용자 식별(`owner_id`) 및 권한 인가가 100% 정상 작동하도록 세션 검증 경로를 일원화했다.
+- Functions 타입체크 0 에러를 달성하여 Cloudflare 배포 파이프라인의 타입 안정성을 확보했다.
+- 미사용 레거시 파일 6개를 정리하고 `src/lib/storage.ts`를 사케 전용으로 경량화하여 번들 크기를 줄였다.
+
 ## MVP 이후로 미룰 것
 
 - [ ] OCR.
