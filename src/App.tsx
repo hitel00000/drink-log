@@ -1010,8 +1010,8 @@ export default function App() {
         <>
           {isLoadingData && !detailRecord ? (
             <div className="desktop-detail-grid">
-              <div className="detail-hero-box">
-                <div className="skeleton-box" style={{ width: "100%", height: "420px" }} />
+              <div className="journal-sheet" style={{ margin: 0, padding: "18px" }}>
+                <div className="skeleton-box" style={{ width: "100%", height: "400px", borderRadius: "var(--radius-md)" }} />
               </div>
               <div className="journal-sheet" style={{ margin: 0 }}>
                 <div className="skeleton-box" style={{ height: "34px", width: "65%", marginBottom: "12px" }} />
@@ -1028,8 +1028,8 @@ export default function App() {
             </div>
           ) : detailRecord ? (
             <div className="desktop-detail-grid">
-              {/* Detail Left: Photo & Multi Thumbs */}
-              <div className="detail-hero-box sticky-detail-photo">
+              {/* Detail Left: Photo & Multi Thumbs (Framed in Journal Sheet) */}
+              <div className="journal-sheet sticky-detail-photo" style={{ margin: 0, padding: "18px" }}>
                 {detailRecord.images.length > 0 ? (
                   <>
                     <div
