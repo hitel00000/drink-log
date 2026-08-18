@@ -107,3 +107,36 @@ npm.cmd run typecheck:functions
 # 3. 배포 번들 빌드 검증
 npm.cmd run build
 ```
+
+---
+
+## 7. UI 레이아웃 및 반응형 컨테이너 규격 (CSS Pitfall 방지)
+
+### 7.1 Body Flexbox Shrink 금지 원칙
+* `body` 태그에 `display: flex; flex-direction: column; align-items: center;`를 절대 적용하지 않는다.
+* **이유**: `align-items: center`가 적용된 flexbox의 직계 자식(`.app-container`)은 `width: 100%`를 선언하더라도 **내부 콘텐츠가 적을 때 Intrinsic Width(콘텐츠 최소 너비)로 가로폭이 쪼그라드는(Shrink)** 브라우저 레이아웃 특성이 있다. 이로 인해 데스크탑 화면에서도 부모 컨테이너가 500px로 축소되어 하위 Grid 미디어 쿼리가 모바일 1열 모드로 오작동하게 된다.
+* **표준 컨테이너 선언**:
+  ```css
+  body {
+    background-color: var(--bg-base);
+    color: var(--text-primary);
+    font-family: var(--font-sans);
+    min-height: 100vh;
+  }
+
+  .app-container {
+    width: 100%;
+    max-width: 1060px;
+    margin: 0 auto;
+    padding: 0 16px 80px;
+    box-sizing: border-box;
+  }
+  ```
+
+### 7.2 컬렉션 갤러리 반응형 그리드 규격
+* 갤러리 그리드(`.desktop-gallery-3col`)는 아이템 개수(1개~N개)에 무관하게 항상 일관된 열 수를 보장하는 명시적 미디어 쿼리를 사용한다:
+  * **모바일 (<640px)**: `grid-template-columns: 1fr;` (1열 풀 위드)
+  * **태블릿 (640px ~ 959px)**: `grid-template-columns: repeat(2, minmax(0, 1fr));` (2열 나란히)
+  * **데스크탑 (≥960px)**: `grid-template-columns: repeat(3, minmax(0, 1fr));` (3열 매거진 그리드)
+* 카드가 1개만 있을 때도 1번째 칸 사케 카드 + 2번째 칸 [+ 추가하기] 카드가 가로로 나란히 정렬되어 화면이 찌그러지지 않는다.
+

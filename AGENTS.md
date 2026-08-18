@@ -105,6 +105,11 @@
 - 동행: 선택
 - 안주: 선택
 
+### 6.6 레이아웃 및 CSS 주의사항 (Pitfalls)
+- `body`에 `display: flex; align-items: center;`를 절대 사용하지 않는다. (자식 `.app-container`가 shrink되어 갤러리 그리드가 모바일 1열로 붕괴되는 현상 방지)
+- 컨테이너는 항상 `.app-container { width: 100%; max-width: 1060px; margin: 0 auto; box-sizing: border-box; }` 블록 모델을 유지한다.
+- 갤러리 그리드는 모바일(1열), 태블릿(2열), 데스크탑(3열)의 명시적 미디어 쿼리를 사용하여 카드가 1개일 때도 좌우 대칭이 유지되도록 한다.
+
 ---
 
 ## 7. 검증 규칙
