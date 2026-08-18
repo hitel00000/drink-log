@@ -11,16 +11,16 @@ fields:
     constraints:
       unique: true
   - name: owner_id
-    type: int
+    type: string
     nullable: false
   - name: record_id
     type: int
     nullable: false
   - name: image_key
-    type: text
-    nullable: false
+    type: blob
+    nullable: true
   - name: thumbnail_key
-    type: text
+    type: blob
     nullable: true
   - name: mime_type
     type: string

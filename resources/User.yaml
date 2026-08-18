@@ -5,11 +5,6 @@ resource:
   soft_delete: false
 
 fields:
-  - name: legacy_id
-    type: string
-    nullable: true
-    constraints:
-      unique: true
   - name: provider
     type: string
     nullable: false
@@ -28,6 +23,13 @@ fields:
   - name: last_login_at
     type: datetime
     nullable: true
+  - name: role
+    type: enum
+    nullable: false
+    default: "user"
+    constraints:
+      values: ["admin", "user"]
+
 constraints:
   unique_together:
     - [provider, provider_user_id]
@@ -38,4 +40,4 @@ auth:
     create: public
     read: authenticated
     update: owner
-    delete: owner
+    delete: role:admin
