@@ -221,7 +221,7 @@ export async function handleImages(request: Request, env: AppEnv) {
 }
 
 export const onRequest: PagesFunction<AppEnv> = async (context) => {
-  const { request, env, executionCtx } = context;
+  const { request, env } = context;
   const url = new URL(request.url);
   const pathname = url.pathname;
 
@@ -253,5 +253,5 @@ export const onRequest: PagesFunction<AppEnv> = async (context) => {
     BUCKET: bucket,
   };
 
-  return moldApp.fetch(request, mappedEnv, executionCtx);
+  return moldApp.fetch(request, mappedEnv, context as unknown as ExecutionContext);
 };

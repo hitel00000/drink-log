@@ -91,9 +91,9 @@ async function getAuthUser(c: any): Promise<AuthUser | null> {
   if (alcoholMatch) {
     const token = decodeURIComponent(alcoholMatch[1]);
     try {
-      const sess = await c.env.DB.prepare('SELECT user_id FROM "oauth_sessions" WHERE id = ? AND expires_at > ?').bind(token, new Date().toISOString()).first<{ user_id: any }>();
+      const sess = (await c.env.DB.prepare('SELECT user_id FROM "oauth_sessions" WHERE id = ? AND expires_at > ?').bind(token, new Date().toISOString()).first()) as { user_id: any } | null;
       if (sess && sess.user_id != null) {
-        const u = await c.env.DB.prepare('SELECT * FROM "users" WHERE id = ?').bind(sess.user_id).first<any>();
+        const u = (await c.env.DB.prepare('SELECT * FROM "users" WHERE id = ?').bind(sess.user_id).first()) as any;
         if (u) {
           return { id: u.id, role: u.role || 'user' };
         }
@@ -108,9 +108,9 @@ async function getAuthUser(c: any): Promise<AuthUser | null> {
   if (match) {
     const token = match[1];
     try {
-      const sess = await c.env.DB.prepare('SELECT user_id FROM "_mold_sessions" WHERE id = ? AND expires_at > ?').bind(token, new Date().toISOString()).first<{ user_id: any }>();
+      const sess = (await c.env.DB.prepare('SELECT user_id FROM "_mold_sessions" WHERE id = ? AND expires_at > ?').bind(token, new Date().toISOString()).first()) as { user_id: any } | null;
       if (sess && sess.user_id != null) {
-        const u = await c.env.DB.prepare('SELECT * FROM "users" WHERE id = ?').bind(sess.user_id).first<any>();
+        const u = (await c.env.DB.prepare('SELECT * FROM "users" WHERE id = ?').bind(sess.user_id).first()) as any;
         if (u) {
           return { id: u.id, role: u.role || 'user' };
         }
