@@ -110,6 +110,9 @@
 - 컨테이너는 항상 `.app-container { width: 100%; max-width: 1060px; margin: 0 auto; box-sizing: border-box; }` 블록 모델을 유지한다.
 - 갤러리 그리드는 모바일(1열), 태블릿(2열), 데스크탑(3열)의 명시적 미디어 쿼리를 사용하여 카드가 1개일 때도 좌우 대칭이 유지되도록 한다.
 
+### 6.7 공식 디자인 시스템 가이드 (SSOT)
+- 모든 UI/UX 디자인 원칙, Warm Linen 컬러 토큰, Noto Serif KR/Pretendard 타이포그래피, 단일 저널 시트 규격은 `docs/DESIGN_GUIDE.md`를 최우선 단일 진실 공급원으로 준수한다.
+
 ---
 
 ## 7. 검증 규칙

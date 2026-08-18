@@ -140,3 +140,6 @@ npm.cmd run build
   * **데스크탑 (≥960px)**: `grid-template-columns: repeat(3, minmax(0, 1fr));` (3열 매거진 그리드)
 * 카드가 1개만 있을 때도 1번째 칸 사케 카드 + 2번째 칸 [+ 추가하기] 카드가 가로로 나란히 정렬되어 화면이 찌그러지지 않는다.
 
+### 7.3 공식 디자인 시스템 가이드 참조
+* 사케 테이스팅 저널의 시각 디자인 언어, Warm Linen 컬러 토큰 표, Noto Serif KR/Pretendard 타이포그래피 계층, 컴포넌트 표준 규격 및 안티패턴 방지 가이드라인은 `docs/DESIGN_GUIDE.md`를 단일 진실 공급원(SSOT)으로 삼는다.
+
