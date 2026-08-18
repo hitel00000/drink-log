@@ -714,6 +714,18 @@ export async function saveSakeRecord(
   const now = new Date().toISOString();
 
   if (cloudStorageEnabled) {
+    try {
+      const entry = await cloudFetchData<SakeRecordEntry>(CLOUD_ENTRIES_PATH, {
+        method: "POST",
+        body: JSON.stringify(draft),
+      });
+      if (entry && entry.id) {
+        return entry;
+      }
+    } catch (error) {
+      console.warn("One-shot POST /api/entries failed, falling back to legacy multi-step:", error);
+    }
+
     let createdRecordId: number | string | null = null;
     const createdImageIds: (number | string)[] = [];
     const createdRecordTagIds: (number | string)[] = [];
