@@ -1078,6 +1078,91 @@ body {
 }
 
 /* ====================================================
+   SKELETON SHIMMER & ZEN LOADER
+==================================================== */
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+.skeleton-box {
+  background: linear-gradient(90deg, #f0ebd9 25%, #f8f5ee 50%, #f0ebd9 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+  border-radius: var(--radius-sm);
+}
+
+.skeleton-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  box-shadow: var(--shadow-sheet);
+  display: flex;
+  flex-direction: column;
+}
+
+.skeleton-card-img {
+  width: 100%;
+  height: 225px;
+}
+
+.skeleton-card-body {
+  padding: 18px 20px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.zen-splash-loader {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 55vh;
+  gap: 16px;
+}
+
+.zen-splash-logo {
+  width: 52px;
+  height: 52px;
+  border-radius: var(--radius-md);
+  background: var(--gold-soft-bg);
+  border: 1px solid rgba(150, 116, 38, 0.25);
+  color: var(--gold-primary);
+  font-family: var(--font-serif);
+  font-size: 1.6rem;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: zenPulse 1.6s ease-in-out infinite;
+}
+
+@keyframes zenPulse {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 0.85;
+  }
+  50% {
+    transform: scale(1.06);
+    opacity: 1;
+    box-shadow: 0 0 16px var(--gold-glow);
+  }
+}
+
+.zen-splash-text {
+  font-size: 0.88rem;
+  color: var(--text-tertiary);
+  font-family: var(--font-serif);
+  letter-spacing: 0.04em;
+}
+
+/* ====================================================
    COLLECTION GALLERY & LIST VIEW
 ==================================================== */
 .collection-card {
