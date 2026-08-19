@@ -50,16 +50,18 @@
 
 ---
 
-## 4. Mold Native 아키텍처 작업 규칙
+## 4. Mold Native 아키텍처 및 코드 생성 규칙
 
 1. **단일 진실 공급원 (Single Source of Truth)**:
    * 데이터 모델, 필드 타입, 제약조건, 권한(`permissions`) 수정은 항상 `resources/*.yaml`에서 먼저 수행한다.
-2. **생성 코드 직접 수정 금지**:
-   * `functions/_shared/generated/mold_app.ts`는 언제든 재생성될 수 있는 산출물이다. 이 파일을 직접 수정하여 비즈니스 로직을 구현하지 않는다.
-3. **외부 브릿지 및 어댑터 활용**:
-   * 인증 연동, 세션 주입, 특수 헤더 처리 등은 `functions/api/[[path]].ts` 또는 `functions/_shared/auth.ts`와 같은 상위 게이트웨이 레이어에서 처리한다.
-4. **Mold 피드백 및 개선 제안**:
-   * Mold 역시 계속해서 발전 및 개발 중인 도구이므로, 프로젝트 개발 중 "Mold 코어에 이런 기능/옵션/템플릿 개선이 있으면 좋겠다"고 판단되는 유용한 아이디어나 불편 사항이 발견되면 사용자에게 적극적으로 공유하고 제안한다.
+2. **코드 생성 워크플로우 (Codegen Workflow)**:
+   * `resources/*.yaml` 스키마 수정 후에는 반드시 `npm run codegen`을 실행하여 `functions/_shared/generated/mold_app.ts`를 갱신하고 Git에 함께 커밋한다.
+   * `functions/_shared/generated/mold_app.ts`는 언제든 재생성될 수 있는 산출물이므로 이 파일을 직접 수정하여 비즈니스 로직을 구현하지 않는다.
+3. **아키텍처 경계 및 Edge BFF 하이브리드 원칙**:
+   * **조회(Read) 및 단일 엔티티 CRUD**: Mold Native 엔드포인트(`GET /api/sake_records?include=images,record_tags`, `POST /api/tags`)를 100% 직접 활용한다.
+   * **복합 도메인 C/U/D (Write/Update/Delete)**: 모바일 단일 RTT와 D1 Batch + R2 원자적 무결성을 위해 Edge BFF(`functions/api/[[path]].ts` ➔ `POST/PUT/DELETE /api/entries`) 핸들러에서 처리한다.
+4. **Mold 피드백 및 파이프라인 협업**:
+   * Mold 도구/프레임워크 개선 사항이나 마찰 요인이 발견되면 `pipe/mold-drinklog/` 파이프라인을 통해 문서로 적극 공유하고 제안한다.
 
 ---
 

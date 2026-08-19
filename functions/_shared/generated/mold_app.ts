@@ -2536,5 +2536,3 @@ app.post('/logout', async (c) => {
 });
 
 export default app;
-
-export { app as moldApp };

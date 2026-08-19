@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "dev:https": "vite --mode https --host 0.0.0.0",
+    "codegen": "go run -C ../mold ./cmd/mold codegen -d ../drink-log/resources -o ../drink-log/functions/_shared/generated/mold_app.ts",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",

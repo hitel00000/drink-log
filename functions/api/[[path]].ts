@@ -1,4 +1,4 @@
-import { moldApp } from "../_shared/generated/mold_app";
+import moldApp from "../_shared/generated/mold_app";
 import {
   createOAuthStateCookie,
   clearOAuthStateCookie,
