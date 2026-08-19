@@ -496,7 +496,10 @@ export default function App() {
         </a>
         <div className="header-right">
           {authSession.authenticated && authSession.user && (
-            <div className="user-profile-widget" title={authSession.user.email ?? ""}>
+            <div
+              className="user-profile-widget"
+              title={`${authSession.user.displayName || "사용자"}${authSession.user.email ? ` (${authSession.user.email})` : ""}`}
+            >
               {authSession.user.avatarUrl ? (
                 <img src={authSession.user.avatarUrl} className="user-avatar-img" alt="Avatar" />
               ) : (
@@ -504,9 +507,6 @@ export default function App() {
                   {authSession.user.displayName?.[0] || "U"}
                 </div>
               )}
-              <span className="user-name-text">
-                {authSession.user.displayName || authSession.user.email || "사용자"}
-              </span>
             </div>
           )}
           {authSession.authenticated && (
