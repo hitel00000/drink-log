@@ -327,6 +327,10 @@ export async function handleEntriesCreate(request: Request, env: AppEnv) {
       }
     }
 
+    if (!imageKey) {
+      continue;
+    }
+
     processedImages.push({
       imageKey,
       thumbnailKey,
@@ -533,7 +537,22 @@ export async function handleEntriesUpdate(request: Request, env: AppEnv, recordI
   const now = new Date().toISOString();
   const uploadedR2Keys: string[] = [];
 
+  // Fetch existing images to preserve their R2 keys and detect removals
+  const existingImagesRes = await db
+    .prepare(`SELECT * FROM sake_images WHERE record_id = ? AND owner_id = ?`)
+    .bind(recordId, session.userId)
+    .all<any>();
+  const existingImages = (existingImagesRes.results || []) as any[];
+  const existingImagesMap = new Map<number | string, any>();
+  for (const img of existingImages) {
+    if (img.id !== undefined && img.id !== null) {
+      existingImagesMap.set(img.id, img);
+      existingImagesMap.set(String(img.id), img);
+    }
+  }
+
   // 1. Process and upload images to R2 (preserving existing R2 keys)
+  const preservedR2Keys = new Set<string>();
   const processedImages: any[] = [];
   const rawImages = Array.isArray(draft.images) ? draft.images : [];
   for (let i = 0; i < rawImages.length; i++) {
@@ -544,8 +563,9 @@ export async function handleEntriesUpdate(request: Request, env: AppEnv, recordI
     const ext = fileName.includes(".") ? fileName.substring(fileName.lastIndexOf(".")) : ".jpg";
     const displayOrder = typeof img.display_order === "number" ? img.display_order : i;
 
-    let imageKey = extractR2Key(img.data_url || img.image_key);
-    let thumbnailKey = extractR2Key(img.thumbnail_data_url || img.thumbnail_key);
+    const existingImg = img.id ? existingImagesMap.get(img.id) : null;
+    let imageKey = existingImg ? existingImg.image_key : extractR2Key(img.data_url || img.image_key);
+    let thumbnailKey = existingImg ? existingImg.thumbnail_key : extractR2Key(img.thumbnail_data_url || img.thumbnail_key);
 
     const dataUrl = img.data_url || img.image_key;
     if (typeof dataUrl === "string" && dataUrl.startsWith("data:")) {
@@ -579,6 +599,17 @@ export async function handleEntriesUpdate(request: Request, env: AppEnv, recordI
       }
     }
 
+    if (imageKey) {
+      preservedR2Keys.add(imageKey);
+    }
+    if (thumbnailKey) {
+      preservedR2Keys.add(thumbnailKey);
+    }
+
+    if (!imageKey) {
+      continue;
+    }
+
     processedImages.push({
       imageKey,
       thumbnailKey,
@@ -586,6 +617,16 @@ export async function handleEntriesUpdate(request: Request, env: AppEnv, recordI
       mimeType,
       displayOrder,
     });
+  }
+
+  // Clean up removed R2 images
+  for (const existingImg of existingImages) {
+    if (existingImg.image_key && !preservedR2Keys.has(existingImg.image_key)) {
+      bucket.delete(existingImg.image_key).catch(() => {});
+    }
+    if (existingImg.thumbnail_key && !preservedR2Keys.has(existingImg.thumbnail_key)) {
+      bucket.delete(existingImg.thumbnail_key).catch(() => {});
+    }
   }
 
   // 2. D1 Batch Atomic Update
