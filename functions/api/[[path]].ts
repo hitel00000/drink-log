@@ -719,60 +719,6 @@ export async function handleEntriesUpdate(request: Request, env: AppEnv, recordI
   });
 }
 
-export async function handleEntriesDelete(request: Request, env: AppEnv, recordId: number) {
-  const session = await readSession(request, env);
-  if (!session) {
-    return new Response(JSON.stringify({ error: "Unauthorized" }), {
-      status: 401,
-      headers: { "Content-Type": "application/json" },
-    });
-  }
-
-  const db = getDatabase(env);
-  const existingRecord = await db
-    .prepare(`SELECT * FROM sake_records WHERE id = ?`)
-    .bind(recordId)
-    .first<any>();
-
-  if (!existingRecord) {
-    return new Response(JSON.stringify({ error: "Record not found" }), {
-      status: 404,
-      headers: { "Content-Type": "application/json" },
-    });
-  }
-
-  if (existingRecord.owner_id !== session.userId) {
-    return new Response(JSON.stringify({ error: "Forbidden" }), {
-      status: 403,
-      headers: { "Content-Type": "application/json" },
-    });
-  }
-
-  // Find images to delete from R2
-  const imagesRes = await db
-    .prepare(`SELECT image_key, thumbnail_key FROM sake_images WHERE record_id = ? AND owner_id = ?`)
-    .bind(recordId, session.userId)
-    .all<any>();
-  const images = imagesRes.results || [];
-
-  const bucket = getImagesBucket(env);
-  for (const img of images) {
-    if (img.image_key) bucket.delete(img.image_key).catch(() => {});
-    if (img.thumbnail_key) bucket.delete(img.thumbnail_key).catch(() => {});
-  }
-
-  await db.batch([
-    db.prepare(`DELETE FROM record_tags WHERE sake_record_id = ?`).bind(recordId),
-    db.prepare(`DELETE FROM sake_images WHERE record_id = ? AND owner_id = ?`).bind(recordId, session.userId),
-    db.prepare(`DELETE FROM sake_records WHERE id = ? AND owner_id = ?`).bind(recordId, session.userId),
-  ]);
-
-  return new Response(JSON.stringify({ success: true }), {
-    status: 200,
-    headers: { "Content-Type": "application/json" },
-  });
-}
-
 export const onRequest: PagesFunction<AppEnv> = async (context) => {
   const { request, env } = context;
   const url = new URL(request.url);
@@ -793,15 +739,12 @@ export const onRequest: PagesFunction<AppEnv> = async (context) => {
   if (pathname === "/api/entries" && request.method === "POST") {
     return handleEntriesCreate(request, env);
   }
-  
+
   const entriesMatch = pathname.match(/^\/api\/entries\/(\d+)$/);
   if (entriesMatch) {
     const entryId = Number(entriesMatch[1]);
     if (request.method === "PUT") {
       return handleEntriesUpdate(request, env, entryId);
-    }
-    if (request.method === "DELETE") {
-      return handleEntriesDelete(request, env, entryId);
     }
   }
 

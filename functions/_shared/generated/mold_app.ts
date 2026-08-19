@@ -826,6 +826,8 @@ app.delete('/api/sake_images/:id', async (c) => {
   } else if (authUser.role !== 'admin' && ownerVal != authUser.id) {
     return writeError(c, 403, 'FORBIDDEN', 'forbidden');
   }
+  if ((existing as any)['image_key']) { try { await c.env.BUCKET.delete((existing as any)['image_key']); } catch (_) {} }
+  if ((existing as any)['thumbnail_key']) { try { await c.env.BUCKET.delete((existing as any)['thumbnail_key']); } catch (_) {} }
   const res = await c.env.DB.prepare('DELETE FROM "sake_images" WHERE id = ?').bind(id).run();
   if (!res.meta.changes) {
     return writeError(c, 404, 'NOT_FOUND', 'record not found');
@@ -1678,6 +1680,13 @@ app.delete('/api/sake_records/:id', async (c) => {
   } else if (authUser.role !== 'admin' && ownerVal != authUser.id) {
     return writeError(c, 403, 'FORBIDDEN', 'forbidden');
   }
+  await c.env.DB.prepare('DELETE FROM "record_tags" WHERE "sake_record_id" = ?').bind(id).run();
+  const childRows_sake_images = await c.env.DB.prepare('SELECT "image_key", "thumbnail_key" FROM "sake_images" WHERE "record_id" = ?').bind(id).all();
+  for (const row of (childRows_sake_images.results || []) as any[]) {
+    if (row['image_key']) { try { await c.env.BUCKET.delete(row['image_key']); } catch (_) {} }
+    if (row['thumbnail_key']) { try { await c.env.BUCKET.delete(row['thumbnail_key']); } catch (_) {} }
+  }
+  await c.env.DB.prepare('DELETE FROM "sake_images" WHERE "record_id" = ?').bind(id).run();
   const res = await c.env.DB.prepare('DELETE FROM "sake_records" WHERE id = ?').bind(id).run();
   if (!res.meta.changes) {
     return writeError(c, 404, 'NOT_FOUND', 'record not found');
@@ -2536,3 +2545,5 @@ app.post('/logout', async (c) => {
 });
 
 export default app;
+
+export { app as moldApp };

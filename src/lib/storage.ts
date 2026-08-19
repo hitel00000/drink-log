@@ -831,7 +831,7 @@ export async function deleteSakeRecord(
   ownerId: number | string = LOCAL_OWNER_ID,
 ): Promise<void> {
   if (cloudStorageEnabled) {
-    await cloudRequest<void>(`${CLOUD_ENTRIES_PATH}/${encodeURIComponent(String(id))}`, {
+    await cloudRequest<void>(`${CLOUD_SAKE_RECORDS_PATH}/${encodeURIComponent(String(id))}`, {
       method: "DELETE",
     });
     return;

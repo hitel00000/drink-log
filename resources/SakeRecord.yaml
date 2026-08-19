@@ -100,12 +100,12 @@ relations:
     kind: has_many
     target: SakeImage
     foreign_key: record_id
-    on_delete: restrict
+    on_delete: cascade
   - name: record_tags
     kind: has_many
     target: RecordTag
     foreign_key: sake_record_id
-    on_delete: restrict
+    on_delete: cascade
 
 auth:
   ownership_field: owner_id
