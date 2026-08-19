@@ -561,42 +561,29 @@ export async function loadSakeRecords(
   ownerId: number | string = LOCAL_OWNER_ID,
 ): Promise<SakeRecordEntry[]> {
   if (cloudStorageEnabled) {
-    try {
-      // 1. Primary: Mold Native Eager Loading (?include=images,record_tags) + Tags (2 HTTP requests)
-      const [recordsWithIncludes, tags] = await Promise.all([
-        fetchAllPages<SakeRecord & { images?: SakeImage[]; record_tags?: SakeRecordTag[] }>(
-          `${CLOUD_SAKE_RECORDS_PATH}?include=images,record_tags`,
-        ),
-        loadSakeTags(ownerId),
-      ]);
+    // Mold Native Eager Loading (?include=images,record_tags) + Tags (2 HTTP requests)
+    const [recordsWithIncludes, tags] = await Promise.all([
+      fetchAllPages<SakeRecord & { images?: SakeImage[]; record_tags?: SakeRecordTag[] }>(
+        `${CLOUD_SAKE_RECORDS_PATH}?include=images,record_tags`,
+      ),
+      loadSakeTags(ownerId),
+    ]);
 
-      return recordsWithIncludes
-        .filter((record) => record.drink_type === "sake")
-        .map((record) =>
-          buildSakeRecordEntry(
-            record,
-            record.images ?? [],
-            record.record_tags ?? [],
-            tags,
-          ),
-        )
-        .sort(
-          (left, right) =>
-            right.record.consumed_date.localeCompare(left.record.consumed_date) ||
-            right.record.created_at.localeCompare(left.record.created_at),
-        );
-    } catch (e) {
-      console.warn("Mold Native ?include= failed, falling back to aggregate /api/entries:", e);
-      try {
-        const entries = await cloudFetchData<SakeRecordEntry[]>(CLOUD_ENTRIES_PATH);
-        if (Array.isArray(entries)) {
-          return entries;
-        }
-      } catch (fallbackErr) {
-        console.error("All cloud record loading methods failed:", fallbackErr);
-        throw e;
-      }
-    }
+    return recordsWithIncludes
+      .filter((record) => record.drink_type === "sake")
+      .map((record) =>
+        buildSakeRecordEntry(
+          record,
+          record.images ?? [],
+          record.record_tags ?? [],
+          tags,
+        ),
+      )
+      .sort(
+        (left, right) =>
+          right.record.consumed_date.localeCompare(left.record.consumed_date) ||
+          right.record.created_at.localeCompare(left.record.created_at),
+      );
   }
 
   return withStores<SakeRecordEntry[]>(

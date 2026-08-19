@@ -73,14 +73,15 @@
 - [x] **단일 사케 기록 조회 최적화 (`GET /api/sake_records/:id?include=images,record_tags`)**:
   - `getSakeRecordById()`에서 전체 목록 find 대신 Mold Native 단일 Eager Loading 엔드포인트를 직접 조회하도록 개선
 
-### 마일스톤 6: Mold 피드백 완결 및 레거시 읽기 게이트웨이 핸들러 클린업 (진행 중)
+### 마일스톤 6: Mold 피드백 완결 및 레거시 읽기 게이트웨이 핸들러 클린업 (완료)
 - [x] **Mold 피드백 교환 및 BFF 하이브리드 아키텍처 결정**:
   - `pipe/mold-drinklog/`를 통해 Mold v2 제안 검토 및 모바일 실무 관점의 Edge BFF 하이브리드 아키텍처 확정 회신 (`2026-08-19-drinklog-to-mold-reply-v2.md`)
-- [ ] **백엔드 `handleEntriesGet` 레거시 조회 핸들러 제거 (`functions/api/[[path]].ts`)**:
+- [x] **백엔드 `handleEntriesGet` 레거시 조회 핸들러 제거 (`functions/api/[[path]].ts`)**:
   - Mold Native `GET /api/sake_records?include=images,record_tags`로 조회가 완전 일원화됨에 따라 불필요해진 메모리 조인 핸들러 및 라우트 제거 (~80줄 감축)
-- [ ] **프론트엔드 스토리지 에러 핸들링 정돈 (`src/lib/storage.ts`)**:
+- [x] **프론트엔드 스토리지 에러 핸들링 정돈 (`src/lib/storage.ts`)**:
   - 불필요해진 `GET /api/entries` fallback 제거 및 Mold Native 읽기 파이프라인 정리
-- [ ] **3대 검증 (`typecheck`, `typecheck:functions`, `build`) 및 무결성 확인**
+- [x] **3대 검증 (`typecheck`, `typecheck:functions`, `build`) 및 무결성 확인**:
+  - 타입체크 및 프로덕션 빌드 0 error 검증 완료
 
 ---
 
