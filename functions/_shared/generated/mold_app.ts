@@ -1945,8 +1945,8 @@ app.post('/api/tags', async (c) => {
   } else {
     delete body['owner_id'];
   }
-  if (body['legacy_id'] !== undefined && body['legacy_id'] !== null && typeof body['legacy_id'] !== 'string') {
-    return writeError(c, 400, 'VALIDATION_FAILED', `field legacy_id must be a string`);
+  if (body['id'] !== undefined && body['id'] !== null && typeof body['id'] !== 'string') {
+    return writeError(c, 400, 'VALIDATION_FAILED', `field id must be a string`);
   }
   if (body['owner_id'] !== undefined && body['owner_id'] !== null && typeof body['owner_id'] !== 'string') {
     return writeError(c, 400, 'VALIDATION_FAILED', `field owner_id must be a string`);
@@ -1980,10 +1980,10 @@ app.post('/api/tags', async (c) => {
   }
 
   const now = new Date().toISOString();
-  const insertSql = `INSERT INTO "tags" ("legacy_id", "owner_id", "drink_type", "tag_group", "label", "is_default", "created_at", "updated_at") VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`;
+  const insertSql = `INSERT INTO "tags" ("id", "owner_id", "drink_type", "tag_group", "label", "is_default", "created_at", "updated_at") VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`;
   let created: any = null;
   try {
-    created = await c.env.DB.prepare(insertSql).bind(body['legacy_id'] !== undefined ? body['legacy_id'] : null, body['owner_id'] !== undefined ? body['owner_id'] : null, body['drink_type'] !== undefined ? body['drink_type'] : 'sake', body['tag_group'] !== undefined ? body['tag_group'] : null, body['label'] !== undefined ? body['label'] : null, body['is_default'] !== undefined ? (body['is_default'] ? 1 : 0) : false, now, now).first<any>();
+    created = await c.env.DB.prepare(insertSql).bind(body['id'] ? String(body['id']) : crypto.randomUUID(), body['owner_id'] !== undefined ? body['owner_id'] : null, body['drink_type'] !== undefined ? body['drink_type'] : 'sake', body['tag_group'] !== undefined ? body['tag_group'] : null, body['label'] !== undefined ? body['label'] : null, body['is_default'] !== undefined ? (body['is_default'] ? 1 : 0) : false, now, now).first<any>();
   } catch (err: any) {
     const errMsg = String(err?.message || err);
     if (errMsg.includes('UNIQUE constraint failed') || errMsg.includes('SQLITE_CONSTRAINT')) {
@@ -2024,8 +2024,8 @@ app.put('/api/tags/:id', async (c) => {
   if (body['role'] !== undefined && body['role'] !== (existing as any)['role'] && body['role'] === 'admin' && (!authUser || authUser.role !== 'admin')) {
     return writeError(c, 403, 'FORBIDDEN', 'cannot grant admin role');
   }
-  if (body['legacy_id'] !== undefined && body['legacy_id'] !== null && typeof body['legacy_id'] !== 'string') {
-    return writeError(c, 400, 'VALIDATION_FAILED', `field legacy_id must be a string`);
+  if (body['id'] !== undefined && body['id'] !== null && typeof body['id'] !== 'string') {
+    return writeError(c, 400, 'VALIDATION_FAILED', `field id must be a string`);
   }
   if (body['owner_id'] !== undefined && body['owner_id'] !== null && typeof body['owner_id'] !== 'string') {
     return writeError(c, 400, 'VALIDATION_FAILED', `field owner_id must be a string`);
@@ -2052,10 +2052,10 @@ app.put('/api/tags/:id', async (c) => {
     return writeError(c, 400, 'VALIDATION_FAILED', `field is_default must be a boolean`);
   }
   const now = new Date().toISOString();
-  const updateSql = `UPDATE "tags" SET "legacy_id" = ?, "owner_id" = ?, "drink_type" = ?, "tag_group" = ?, "label" = ?, "is_default" = ?, "updated_at" = ? WHERE id = ? RETURNING *`;
+  const updateSql = `UPDATE "tags" SET "owner_id" = ?, "drink_type" = ?, "tag_group" = ?, "label" = ?, "is_default" = ?, "updated_at" = ? WHERE id = ? RETURNING *`;
   let updated: any = null;
   try {
-    updated = await c.env.DB.prepare(updateSql).bind(body['legacy_id'] !== undefined ? body['legacy_id'] : (existing as any)['legacy_id'], body['owner_id'] !== undefined ? body['owner_id'] : (existing as any)['owner_id'], body['drink_type'] !== undefined ? body['drink_type'] : (existing as any)['drink_type'], body['tag_group'] !== undefined ? body['tag_group'] : (existing as any)['tag_group'], body['label'] !== undefined ? body['label'] : (existing as any)['label'], body['is_default'] !== undefined ? body['is_default'] : (existing as any)['is_default'], now, id).first();
+    updated = await c.env.DB.prepare(updateSql).bind(body['owner_id'] !== undefined ? body['owner_id'] : (existing as any)['owner_id'], body['drink_type'] !== undefined ? body['drink_type'] : (existing as any)['drink_type'], body['tag_group'] !== undefined ? body['tag_group'] : (existing as any)['tag_group'], body['label'] !== undefined ? body['label'] : (existing as any)['label'], body['is_default'] !== undefined ? body['is_default'] : (existing as any)['is_default'], now, id).first();
   } catch (err: any) {
     const errMsg = String(err?.message || err);
     if (errMsg.includes('UNIQUE constraint failed') || errMsg.includes('SQLITE_CONSTRAINT')) {
@@ -2117,7 +2117,6 @@ app.get('/view/tags', async (c) => {
   let html = `<!DOCTYPE html><html><head><title>Tag List</title></head><body>`;
   html += `<h1>Tag List</h1>`;
   html += `<a href="/view/tags/new">+ New Tag</a><br/><br/><table border="1"><thead><tr><th>id</th>`;
-  html += `<th>legacy_id</th>`;
   html += `<th>owner_id</th>`;
   html += `<th>drink_type</th>`;
   html += `<th>tag_group</th>`;
@@ -2126,7 +2125,6 @@ app.get('/view/tags', async (c) => {
   html += `<th>Actions</th></tr></thead><tbody>`;
   for (const row of viewRecs) {
     html += `<tr><td>${(row as any).id}</td>`;
-    html += `<td>${escapeHTML((row as any)['legacy_id'])}</td>`;
     html += `<td>${escapeHTML((row as any)['owner_id'])}</td>`;
     html += `<td>${escapeHTML((row as any)['drink_type'])}</td>`;
     html += `<td>${escapeHTML((row as any)['tag_group'])}</td>`;
@@ -2141,7 +2139,6 @@ app.get('/view/tags', async (c) => {
 // VIEW NEW /view/tags/new
 app.get('/view/tags/new', async (c) => {
   let html = `<!DOCTYPE html><html><head><title>New Tag</title></head><body><h1>New Tag</h1><form method="POST" action="/view/tags">`;
-  html += `<label>legacy_id: <input type="text" name="legacy_id" /></label><br/><br/>`;
   html += `<label>owner_id: <input type="text" name="owner_id" /></label><br/><br/>`;
   html += `<label>drink_type: <input type="text" name="drink_type" /></label><br/><br/>`;
   html += `<label>tag_group: <input type="text" name="tag_group" /></label><br/><br/>`;
@@ -2157,8 +2154,8 @@ app.post('/view/tags', async (c) => {
   const body: any = {};
   formData.forEach((value, key) => { body[key] = value; });
   const now = new Date().toISOString();
-  const insertSql = `INSERT INTO "tags" ("legacy_id", "owner_id", "drink_type", "tag_group", "label", "is_default", "created_at", "updated_at") VALUES (?, ?, ?, ?, ?, ?, ?, ?)`;
-  await c.env.DB.prepare(insertSql).bind(body['legacy_id'] !== undefined ? body['legacy_id'] : null, body['owner_id'] !== undefined ? body['owner_id'] : null, body['drink_type'] !== undefined ? body['drink_type'] : 'sake', body['tag_group'] !== undefined ? body['tag_group'] : null, body['label'] !== undefined ? body['label'] : null, body['is_default'] !== undefined ? (body['is_default'] ? 1 : 0) : false, now, now).run();
+  const insertSql = `INSERT INTO "tags" ("id", "owner_id", "drink_type", "tag_group", "label", "is_default", "created_at", "updated_at") VALUES (?, ?, ?, ?, ?, ?, ?, ?)`;
+  await c.env.DB.prepare(insertSql).bind(body['id'] ? String(body['id']) : crypto.randomUUID(), body['owner_id'] !== undefined ? body['owner_id'] : null, body['drink_type'] !== undefined ? body['drink_type'] : 'sake', body['tag_group'] !== undefined ? body['tag_group'] : null, body['label'] !== undefined ? body['label'] : null, body['is_default'] !== undefined ? (body['is_default'] ? 1 : 0) : false, now, now).run();
   return c.redirect('/view/tags', 303);
 });
 
@@ -2171,7 +2168,6 @@ app.get('/view/tags/:id', async (c) => {
   const incErr = await processIncludes(c, 'tags', [record], c.req.query('include'), authUser);
   if (incErr) return incErr;
   let html = `<!DOCTYPE html><html><head><title>Tag Detail</title></head><body><h1>Tag #${id}</h1><dl>`;
-  html += `<dt>legacy_id</dt><dd>${escapeHTML(record['legacy_id'])}</dd>`;
   html += `<dt>owner_id</dt><dd>${escapeHTML(record['owner_id'])}</dd>`;
   html += `<dt>drink_type</dt><dd>${escapeHTML(record['drink_type'])}</dd>`;
   html += `<dt>tag_group</dt><dd>${escapeHTML(record['tag_group'])}</dd>`;
@@ -2545,5 +2541,3 @@ app.post('/logout', async (c) => {
 });
 
 export default app;
-
-export { app as moldApp };

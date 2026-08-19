@@ -5,11 +5,9 @@ resource:
   soft_delete: false
 
 fields:
-  - name: legacy_id
+  - name: id
     type: string
     nullable: true
-    constraints:
-      unique: true
   - name: owner_id
     type: string
     nullable: true

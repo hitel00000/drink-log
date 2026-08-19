@@ -21,6 +21,7 @@ coverage/
 *.tsbuildinfo
 
 *.sql
+!migrations/*.sql
 backup_*.sql
 
 .wrangler/
