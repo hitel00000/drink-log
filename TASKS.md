@@ -60,6 +60,10 @@
 - [x] **상세 뷰 저널 플립 네비게이션 (`Journal Flip Prev/Next`)**:
   - 상세 뷰 하단에 이전/다음 사케의 실제 이름을 미리 보여주는 플립 카드 배치
   - 마치 시음 노트를 한 장씩 넘겨보는 듯한 정갈한 아날로그 경험 제공
+- [x] **모바일 브라우저 크로스플랫폼 안정화 (iOS Safari Date Input Overflow 방어)**:
+  - iOS WebKit의 네이티브 Date Picker 및 Grid Blowout(2열 트랙 팽창) 버그 방어를 위한 `repeat(2, minmax(0, 1fr))` 및 `-webkit-appearance: none;`, `::-webkit-date-and-time-value` 리셋 복원
+- [x] **GitHub Pages 등 정적 호스팅 단독 모드 점검 (`Standalone IndexedDB`)**:
+  - Cloudflare Pages Functions가 없는 순수 정적 호스팅 환경(GitHub Pages 등)에서도 로컬 IndexedDB 단독 모드로 매끄럽게 동작함을 실사용 검증 완료
 
 ---
 
@@ -71,11 +75,8 @@
 - [ ] **헤더 프로필 취향 스냅샷 (Taste Snapshot)**:
   - 프로필 영역에 `🍶 12잔의 기록 · ✨ 인생 사케 8병` 형태의 단아한 한 줄 요약 노출로 기록 동기부여 제공.
 
-### 💾 정적 호스팅 & 비클라우드 환경(IndexedDB) 동작 최적화 (검토 예정)
-- [ ] **GitHub Pages 등 정적 호스팅 단독 모드 점검**:
-  - Cloudflare 백엔드 API가 없는 정적 환경(`hitel00000.github.io/drink-log` 등)에서 `src/lib/storage.ts`의 IndexedDB 단독 저장소 폴백 동작 및 데이터 영속성 점검.
-- [ ] **로컬 ➔ 클라우드 마이그레이션 도구 (선택)**:
-  - 비로그인 IndexedDB 모드로 사용하던 로컬 데이터를 추후 Cloudflare 클라우드 계정 로그인 시 안전하게 병합/업로드하는 간이 동기화 플로우 검토.
+### 🚫 제외/보류된 항목 (Dropped)
+- ~~**로컬 ➔ 클라우드 마이그레이션 도구**~~: 단순하고 단단한 Cloud-first / Standalone 격리 원칙 유지를 위해 구현하지 않음.
 
 ### 🔍 기타 기능 백로그
 다음 기능들은 사케 MVP의 단순함과 속도를 해치지 않는 선에서 사용자의 명시적 요청 시 순차적으로 검토한다:
