@@ -65,6 +65,14 @@
 - [x] **GitHub Pages 등 정적 호스팅 단독 모드 점검 (`Standalone IndexedDB`)**:
   - Cloudflare Pages Functions가 없는 순수 정적 호스팅 환경(GitHub Pages 등)에서도 로컬 IndexedDB 단독 모드로 매끄럽게 동작함을 실사용 검증 완료
 
+### 마일스톤 5: Mold Native Phase 11 Eager Loading 읽기 파이프라인 전환 및 조회 최적화 (완료)
+- [x] **Mold Phase 11 실서비스 연동 평가 및 피드백 문서화**:
+  - `../mold/docs/tasks/2026-08-19-drink-log-feedback-phase-11-evaluation.md`에 Nested Update(`PUT`), Blob Storage 수명주기, M:N Eager Loading 제안 등록
+- [x] **목록 조회 읽기 파이프라인의 Mold Native 전환 (`GET /api/sake_records?include=images,record_tags`)**:
+  - `src/lib/storage.ts`의 `loadSakeRecords()`를 Mold Native Eager Loading으로 전환하여 레거시 4회 분할 fetch를 2회(사케 기록 Eager + 태그 마스터)로 최적화
+- [x] **단일 사케 기록 조회 최적화 (`GET /api/sake_records/:id?include=images,record_tags`)**:
+  - `getSakeRecordById()`에서 전체 목록 find 대신 Mold Native 단일 Eager Loading 엔드포인트를 직접 조회하도록 개선
+
 ---
 
 ## 📋 향후 백로그 (Next Backlog)

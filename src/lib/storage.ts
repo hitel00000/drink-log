@@ -562,54 +562,41 @@ export async function loadSakeRecords(
 ): Promise<SakeRecordEntry[]> {
   if (cloudStorageEnabled) {
     try {
-      const entries = await cloudFetchData<SakeRecordEntry[]>(CLOUD_ENTRIES_PATH);
-      if (Array.isArray(entries)) {
-        return entries;
-      }
-    } catch (e) {
-      console.warn("One-shot /api/entries failed, falling back to legacy multi-fetch:", e);
-    }
-
-    const [records, images, recordTags, tags] = await Promise.all([
-      fetchAllPages<SakeRecord>(CLOUD_SAKE_RECORDS_PATH),
-      fetchAllPages<SakeImage>(CLOUD_SAKE_IMAGES_PATH),
-      fetchAllPages<SakeRecordTag>(CLOUD_RECORD_TAGS_PATH),
-      fetchAllPages<SakeTag>(CLOUD_TAGS_PATH),
-    ]);
-
-    const imagesByRecordId = new Map<string, SakeImage[]>();
-    images.forEach((image) => {
-      const key = String(image.record_id);
-      const group = imagesByRecordId.get(key) ?? [];
-      group.push(image);
-      imagesByRecordId.set(key, group);
-    });
-
-    const recordTagsByRecordId = new Map<string, SakeRecordTag[]>();
-    recordTags.forEach((recordTag) => {
-      const recId = recordTag.sake_record_id ?? recordTag.record_id;
-      if (!recId) return;
-      const key = String(recId);
-      const group = recordTagsByRecordId.get(key) ?? [];
-      group.push(recordTag);
-      recordTagsByRecordId.set(key, group);
-    });
-
-    return records
-      .filter((record) => record.drink_type === "sake")
-      .map((record) =>
-        buildSakeRecordEntry(
-          record,
-          imagesByRecordId.get(String(record.id)) ?? [],
-          recordTagsByRecordId.get(String(record.id)) ?? [],
-          tags,
+      // 1. Primary: Mold Native Eager Loading (?include=images,record_tags) + Tags (2 HTTP requests)
+      const [recordsWithIncludes, tags] = await Promise.all([
+        fetchAllPages<SakeRecord & { images?: SakeImage[]; record_tags?: SakeRecordTag[] }>(
+          `${CLOUD_SAKE_RECORDS_PATH}?include=images,record_tags`,
         ),
-      )
-      .sort(
-        (left, right) =>
-          right.record.consumed_date.localeCompare(left.record.consumed_date) ||
-          right.record.created_at.localeCompare(left.record.created_at),
-      );
+        loadSakeTags(ownerId),
+      ]);
+
+      return recordsWithIncludes
+        .filter((record) => record.drink_type === "sake")
+        .map((record) =>
+          buildSakeRecordEntry(
+            record,
+            record.images ?? [],
+            record.record_tags ?? [],
+            tags,
+          ),
+        )
+        .sort(
+          (left, right) =>
+            right.record.consumed_date.localeCompare(left.record.consumed_date) ||
+            right.record.created_at.localeCompare(left.record.created_at),
+        );
+    } catch (e) {
+      console.warn("Mold Native ?include= failed, falling back to aggregate /api/entries:", e);
+      try {
+        const entries = await cloudFetchData<SakeRecordEntry[]>(CLOUD_ENTRIES_PATH);
+        if (Array.isArray(entries)) {
+          return entries;
+        }
+      } catch (fallbackErr) {
+        console.error("All cloud record loading methods failed:", fallbackErr);
+        throw e;
+      }
+    }
   }
 
   return withStores<SakeRecordEntry[]>(
@@ -672,13 +659,31 @@ export async function getSakeRecordById(
 ): Promise<SakeRecordEntry | undefined> {
   if (cloudStorageEnabled) {
     try {
-      const records = await loadSakeRecords(ownerId);
-      return records.find((r) => String(r.id) === String(id));
+      // 1. Primary: Mold Native single item fetch with eager loading
+      const [recordWithIncludes, tags] = await Promise.all([
+        cloudFetchData<SakeRecord & { images?: SakeImage[]; record_tags?: SakeRecordTag[] }>(
+          `${CLOUD_SAKE_RECORDS_PATH}/${id}?include=images,record_tags`,
+        ),
+        loadSakeTags(ownerId),
+      ]);
+
+      if (!recordWithIncludes || recordWithIncludes.drink_type !== "sake") {
+        return undefined;
+      }
+
+      return buildSakeRecordEntry(
+        recordWithIncludes,
+        recordWithIncludes.images ?? [],
+        recordWithIncludes.record_tags ?? [],
+        tags,
+      );
     } catch (error) {
       if (error instanceof CloudStorageError && error.status === 404) {
         return undefined;
       }
-      throw error;
+      console.warn("Mold Native single fetch failed, falling back to full list search:", error);
+      const records = await loadSakeRecords(ownerId);
+      return records.find((r) => String(r.id) === String(id));
     }
   }
 

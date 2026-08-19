@@ -79,31 +79,11 @@ interface AuthUser {
   role: string;
 }
 
-// Resolves authenticated user strictly from session cookie token stored in D1.
-// Supports both alcohol_log_session (Google OAuth) and mold_session.
+// Resolves authenticated user strictly from session cookie token stored in D1 (_mold_sessions).
 // Security Note: Unverified HTTP headers like x-user-id / x-user-role are explicitly rejected
 // to prevent client-side header spoofing attacks.
 async function getAuthUser(c: any): Promise<AuthUser | null> {
   const cookieHeader = c.req.header('Cookie') || '';
-
-  // 1. Check alcohol_log_session (primary session from Google OAuth)
-  const alcoholMatch = cookieHeader.match(/alcohol_log_session=([^;]+)/);
-  if (alcoholMatch) {
-    const token = decodeURIComponent(alcoholMatch[1]);
-    try {
-      const sess = (await c.env.DB.prepare('SELECT user_id FROM "oauth_sessions" WHERE id = ? AND expires_at > ?').bind(token, new Date().toISOString()).first()) as { user_id: any } | null;
-      if (sess && sess.user_id != null) {
-        const u = (await c.env.DB.prepare('SELECT * FROM "users" WHERE id = ?').bind(sess.user_id).first()) as any;
-        if (u) {
-          return { id: u.id, role: u.role || 'user' };
-        }
-      }
-    } catch (e) {
-      // Ignore if oauth_sessions query fails
-    }
-  }
-
-  // 2. Fallback: Check mold_session
   const match = cookieHeader.match(/mold_session=([^;]+)/);
   if (match) {
     const token = match[1];
@@ -125,11 +105,6 @@ async function getAuthUser(c: any): Promise<AuthUser | null> {
 app.get('/', (c) => c.text('Mold Cloudflare Workers Target API'));
 
 const relMetadata: Record<string, Record<string, { kind: string; targetTable: string; fk: string; permRead: string; ownershipField: string; softDelete: boolean; pwdFields: string[] }>> = {
-  'tags': {
-    'owner': { kind: 'belongs_to', targetTable: 'users', fk: 'owner_id', permRead: 'authenticated', ownershipField: 'id', softDelete: false, pwdFields: [] },
-  },
-  'users': {
-  },
   'record_tags': {
     'sake_record': { kind: 'belongs_to', targetTable: 'sake_records', fk: 'sake_record_id', permRead: 'owner', ownershipField: 'owner_id', softDelete: false, pwdFields: [] },
     'tag': { kind: 'belongs_to', targetTable: 'tags', fk: 'tag_id', permRead: 'owner', ownershipField: 'owner_id', softDelete: false, pwdFields: [] },
@@ -143,6 +118,11 @@ const relMetadata: Record<string, Record<string, { kind: string; targetTable: st
     'images': { kind: 'has_many', targetTable: 'sake_images', fk: 'record_id', permRead: 'owner', ownershipField: 'owner_id', softDelete: false, pwdFields: [] },
     'record_tags': { kind: 'has_many', targetTable: 'record_tags', fk: 'sake_record_id', permRead: 'authenticated', ownershipField: '', softDelete: false, pwdFields: [] },
   },
+  'tags': {
+    'owner': { kind: 'belongs_to', targetTable: 'users', fk: 'owner_id', permRead: 'authenticated', ownershipField: 'id', softDelete: false, pwdFields: [] },
+  },
+  'users': {
+  },
 };
 
 async function processIncludes(c: any, currentTable: string, records: any[], includeStr: string | undefined, authUser: AuthUser | null): Promise<any> {
@@ -152,613 +132,136 @@ async function processIncludes(c: any, currentTable: string, records: any[], inc
 
   const validRels: Array<{ name: string; info: any }> = [];
   for (const item of items) {
+    if (item.includes('.')) {
+      return writeError(c, 400, 'INVALID_INCLUDE', `invalid relation '${item}' for include`);
+    }
     const info = currentRels[item];
-    if (!info || info.kind !== 'belongs_to') {
+    if (!info || (info.kind !== 'belongs_to' && info.kind !== 'has_many')) {
       return writeError(c, 400, 'INVALID_INCLUDE', `invalid relation '${item}' for include`);
     }
     validRels.push({ name: item, info });
   }
 
   for (const rel of validRels) {
-    const fkCol = rel.info.fk;
-    const targetTable = rel.info.targetTable;
-    const fkVals = Array.from(new Set(records.map(r => r[fkCol]).filter(v => v !== null && v !== undefined && v !== '')));
+    if (rel.info.kind === 'belongs_to') {
+      const fkCol = rel.info.fk;
+      const targetTable = rel.info.targetTable;
+      const fkVals = Array.from(new Set(records.map(r => r[fkCol]).filter(v => v !== null && v !== undefined && v !== '')));
 
-    for (const r of records) {
-      r[rel.name] = null;
-    }
+      for (const r of records) {
+        r[rel.name] = null;
+      }
 
-    if (fkVals.length === 0) continue;
+      if (fkVals.length === 0) continue;
 
-    const placeholders = fkVals.map(() => '?').join(', ');
-    const softCond = rel.info.softDelete ? ' AND "deleted_at" IS NULL' : '';
-    const sql = `SELECT * FROM "${targetTable}" WHERE id IN (${placeholders})${softCond}`;
-    const { results } = await c.env.DB.prepare(sql).bind(...fkVals).all();
+      const placeholders = fkVals.map(() => '?').join(', ');
+      const softCond = rel.info.softDelete ? ' AND "deleted_at" IS NULL' : '';
+      const sql = `SELECT * FROM "${targetTable}" WHERE id IN (${placeholders})${softCond}`;
+      const { results } = await c.env.DB.prepare(sql).bind(...fkVals).all();
 
-    const targetMap = new Map<any, any>();
-    for (const tRec of (results || []) as any[]) {
-      const idVal = tRec.id;
-      if (idVal === null || idVal === undefined) continue;
+      const targetMap = new Map<any, any>();
+      for (const tRec of (results || []) as any[]) {
+        const idVal = tRec.id;
+        if (idVal === null || idVal === undefined) continue;
 
-      let allowed = true;
-      if (rel.info.permRead === 'owner' && rel.info.ownershipField) {
-        const ownerVal = tRec[rel.info.ownershipField];
-        if (ownerVal !== null && ownerVal !== undefined) {
-          if (!authUser || (authUser.role !== 'admin' && ownerVal != authUser.id)) {
+        let allowed = true;
+        if (rel.info.permRead === 'owner' && rel.info.ownershipField) {
+          const ownerVal = tRec[rel.info.ownershipField];
+          if (ownerVal !== null && ownerVal !== undefined) {
+            if (!authUser || (authUser.role !== 'admin' && ownerVal != authUser.id)) {
+              allowed = false;
+            }
+          }
+        } else if (rel.info.permRead.startsWith('role:')) {
+          const role = rel.info.permRead.substring(5);
+          if (!authUser || (authUser.role !== role && authUser.role !== 'admin')) {
+            allowed = false;
+          }
+        } else if (rel.info.permRead === 'authenticated') {
+          if (!authUser) {
             allowed = false;
           }
         }
-      } else if (rel.info.permRead.startsWith('role:')) {
-        const role = rel.info.permRead.substring(5);
-        if (!authUser || (authUser.role !== role && authUser.role !== 'admin')) {
-          allowed = false;
-        }
-      } else if (rel.info.permRead === 'authenticated') {
-        if (!authUser) {
-          allowed = false;
+
+        if (allowed) {
+          targetMap.set(idVal, sanitizeRecord(tRec, rel.info.pwdFields));
         }
       }
 
-      if (allowed) {
-        targetMap.set(idVal, sanitizeRecord(tRec, rel.info.pwdFields));
+      for (const r of records) {
+        const fkVal = r[fkCol];
+        if (fkVal !== null && fkVal !== undefined && targetMap.has(fkVal)) {
+          r[rel.name] = targetMap.get(fkVal);
+        } else {
+          r[rel.name] = null;
+        }
       }
-    }
+    } else if (rel.info.kind === 'has_many') {
+      const fkCol = rel.info.fk;
+      const targetTable = rel.info.targetTable;
+      const parentIDs = Array.from(new Set(records.map(r => r.id).filter(v => v !== null && v !== undefined && v !== '')));
 
-    for (const r of records) {
-      const fkVal = r[fkCol];
-      if (fkVal !== null && fkVal !== undefined && targetMap.has(fkVal)) {
-        r[rel.name] = targetMap.get(fkVal);
-      } else {
-        r[rel.name] = null;
+      for (const r of records) {
+        r[rel.name] = [];
+      }
+
+      if (parentIDs.length === 0 || !fkCol) continue;
+
+      const placeholders = parentIDs.map(() => '?').join(', ');
+      const softCond = rel.info.softDelete ? ' AND "deleted_at" IS NULL' : '';
+      const sql = `SELECT * FROM "${targetTable}" WHERE "${fkCol}" IN (${placeholders})${softCond}`;
+      const { results } = await c.env.DB.prepare(sql).bind(...parentIDs).all();
+
+      const childMap = new Map<any, any[]>();
+      for (const cRec of (results || []) as any[]) {
+        const parentFK = cRec[fkCol];
+        if (parentFK === null || parentFK === undefined) continue;
+
+        let allowed = true;
+        if (rel.info.permRead === 'owner' && rel.info.ownershipField) {
+          const ownerVal = cRec[rel.info.ownershipField];
+          if (ownerVal !== null && ownerVal !== undefined) {
+            if (!authUser || (authUser.role !== 'admin' && ownerVal != authUser.id)) {
+              allowed = false;
+            }
+          }
+        } else if (rel.info.permRead.startsWith('role:')) {
+          const role = rel.info.permRead.substring(5);
+          if (!authUser || (authUser.role !== role && authUser.role !== 'admin')) {
+            allowed = false;
+          }
+        } else if (rel.info.permRead === 'authenticated') {
+          if (!authUser) {
+            allowed = false;
+          }
+        }
+
+        if (allowed) {
+          const sanitized = sanitizeRecord(cRec, rel.info.pwdFields);
+          if (!childMap.has(parentFK)) {
+            childMap.set(parentFK, []);
+          }
+          const list = childMap.get(parentFK)!;
+          list.push(sanitized);
+          if (list.length > 50) {
+            return writeError(c, 400, 'INCLUDE_TOO_LARGE', `nested records for relation '${rel.name}' exceed limit of 50`);
+          }
+        }
+      }
+
+      for (const r of records) {
+        const pID = r.id;
+        if (pID !== null && pID !== undefined && childMap.has(pID)) {
+          r[rel.name] = childMap.get(pID);
+        } else {
+          r[rel.name] = [];
+        }
       }
     }
   }
 
   return null;
 }
-
-
-// LIST /api/tags
-app.get('/api/tags', async (c) => {
-  const authUser = await getAuthUser(c);
-  const limit = Math.min(parseInt(c.req.query('limit') || '20', 10), 100);
-  const offset = Math.max(parseInt(c.req.query('offset') || '0', 10), 0);
-
-  const whereConds: string[] = [];
-  const params: any[] = [];
-  if (!authUser || authUser.role !== 'admin') {
-    if (authUser) {
-      whereConds.push('("owner_id" = ? OR "owner_id" IS NULL)');
-      params.push(authUser.id);
-    } else {
-      whereConds.push('"owner_id" IS NULL');
-    }
-  }
-  const whereClause = whereConds.length > 0 ? ' WHERE ' + whereConds.join(' AND ') : '';
-  const countSql = `SELECT COUNT(*) as total FROM "tags"${whereClause}`;
-  const countStmt = await c.env.DB.prepare(countSql).bind(...params).first<{ total: number }>();
-  const total = countStmt ? countStmt.total : 0;
-  const querySql = `SELECT * FROM "tags"${whereClause} ORDER BY id ASC LIMIT ? OFFSET ?`;
-  const { results } = await c.env.DB.prepare(querySql).bind(...params, limit, offset).all();
-  const sanitized = (results || []).map((r: any) => sanitizeRecord(r, []));
-  const incErr = await processIncludes(c, 'tags', sanitized, c.req.query('include'), authUser);
-  if (incErr) return incErr;
-  return c.json({
-    data: sanitized,
-    meta: { total, limit, offset }
-  });
-});
-
-// DETAIL /api/tags/:id
-app.get('/api/tags/:id', async (c) => {
-  const authUser = await getAuthUser(c);
-  const id = c.req.param('id');
-  const record = await c.env.DB.prepare('SELECT * FROM "tags" WHERE id = ?').bind(id).first();
-  if (!record) {
-    return writeError(c, 404, 'NOT_FOUND', 'record not found');
-  }
-  const ownerVal = (record as any)['owner_id'];
-  if (ownerVal !== null && ownerVal !== undefined) {
-    if (!authUser) {
-      return writeError(c, 401, 'UNAUTHORIZED', 'authentication required');
-    }
-    if (authUser.role !== 'admin' && ownerVal != authUser.id) {
-      return writeError(c, 403, 'FORBIDDEN', 'forbidden');
-    }
-  }
-  const sanitized = sanitizeRecord(record, []);
-  const incErr = await processIncludes(c, 'tags', [sanitized], c.req.query('include'), authUser);
-  if (incErr) return incErr;
-  return c.json({ data: sanitized });
-});
-
-// CREATE /api/tags
-app.post('/api/tags', async (c) => {
-  const authUser = await getAuthUser(c);
-  if (!authUser) {
-    return writeError(c, 401, 'UNAUTHORIZED', 'authentication required');
-  }
-  let body: any = {};
-  let formData: FormData | null = null;
-  const rawHeader = c.req.header('content-type') || c.req.header('Content-Type') || (c.req.raw && c.req.raw.headers ? c.req.raw.headers.get('content-type') : '') || '';
-  const contentType = String(rawHeader).toLowerCase();
-  if (contentType.includes('multipart/form-data')) {
-    try {
-      formData = await c.req.formData();
-      formData.forEach((val, key) => {
-        if (typeof val === 'string') { body[key] = (val !== '' && !isNaN(Number(val))) ? Number(val) : val; }
-      });
-    } catch (e) {
-      return writeError(c, 400, 'INVALID_MULTIPART', 'failed to parse multipart body');
-    }
-  } else {
-    try {
-      body = await c.req.json();
-    } catch (e) {
-      return writeError(c, 400, 'INVALID_JSON', 'failed to parse json body');
-    }
-  }
-
-  if (body['role'] === 'admin' && (!authUser || authUser.role !== 'admin')) {
-    return writeError(c, 403, 'FORBIDDEN', 'cannot grant admin role');
-  }
-  if (authUser) {
-    body['owner_id'] = authUser.id;
-  } else {
-    delete body['owner_id'];
-  }
-  if (body['legacy_id'] !== undefined && body['legacy_id'] !== null && typeof body['legacy_id'] !== 'string') {
-    return writeError(c, 400, 'VALIDATION_FAILED', 'field legacy_id must be a string');
-  }
-  if (body['owner_id'] !== undefined && body['owner_id'] !== null && typeof body['owner_id'] !== 'string') {
-    return writeError(c, 400, 'VALIDATION_FAILED', 'field owner_id must be a string');
-  }
-  if (body['drink_type'] !== undefined && body['drink_type'] !== null && typeof body['drink_type'] !== 'string') {
-    return writeError(c, 400, 'VALIDATION_FAILED', 'field drink_type must be a string');
-  }
-  if (body['tag_group'] === undefined || body['tag_group'] === null) {
-    return writeError(c, 400, 'VALIDATION_FAILED', 'field tag_group is required');
-  }
-  if (body['label'] === undefined || body['label'] === null) {
-    return writeError(c, 400, 'VALIDATION_FAILED', 'field label is required');
-  }
-  if (body['label'] !== undefined && body['label'] !== null && typeof body['label'] !== 'string') {
-    return writeError(c, 400, 'VALIDATION_FAILED', 'field label must be a string');
-  }
-  if (body['is_default'] !== undefined && body['is_default'] !== null && typeof body['is_default'] !== 'boolean') {
-    return writeError(c, 400, 'VALIDATION_FAILED', 'field is_default must be a boolean');
-  }
-
-  const now = new Date().toISOString();
-  const insertSql = `INSERT INTO "tags" ("legacy_id", "owner_id", "drink_type", "tag_group", "label", "is_default", "created_at", "updated_at") VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`;
-  let created: any = null;
-  try {
-    created = await c.env.DB.prepare(insertSql).bind(body['legacy_id'] !== undefined ? body['legacy_id'] : null, body['owner_id'] !== undefined ? body['owner_id'] : null, body['drink_type'] !== undefined ? body['drink_type'] : 'sake', body['tag_group'] !== undefined ? body['tag_group'] : null, body['label'] !== undefined ? body['label'] : null, body['is_default'] !== undefined ? (body['is_default'] ? 1 : 0) : false, now, now).first<any>();
-  } catch (err: any) {
-    const errMsg = String(err?.message || err);
-    if (errMsg.includes('UNIQUE constraint failed') || errMsg.includes('SQLITE_CONSTRAINT')) {
-      return writeError(c, 400, 'INVALID_INPUT', `unique constraint failed: ${errMsg}`);
-    }
-    return writeError(c, 400, 'INVALID_INPUT', errMsg);
-  }
-  return c.json({ data: sanitizeRecord(created, []) }, 201);
-});
-
-// UPDATE /api/tags/:id
-app.put('/api/tags/:id', async (c) => {
-  const authUser = await getAuthUser(c);
-  if (!authUser) {
-    return writeError(c, 401, 'UNAUTHORIZED', 'authentication required');
-  }
-  const id = c.req.param('id');
-  const existing = await c.env.DB.prepare('SELECT * FROM "tags" WHERE id = ?').bind(id).first();
-  if (!existing) {
-    return writeError(c, 404, 'NOT_FOUND', 'record not found');
-  }
-  const ownerVal = (existing as any)['owner_id'];
-  if (ownerVal === null || ownerVal === undefined) {
-    if (authUser.role !== 'admin') {
-      return writeError(c, 403, 'FORBIDDEN', 'forbidden');
-    }
-  } else if (authUser.role !== 'admin' && ownerVal != authUser.id) {
-    return writeError(c, 403, 'FORBIDDEN', 'forbidden');
-  }
-  let body: any;
-  try {
-    body = await c.req.json();
-  } catch (e) {
-    return writeError(c, 400, 'INVALID_JSON', 'failed to parse json body');
-  }
-
-  if (body['role'] !== undefined && body['role'] !== (existing as any)['role'] && body['role'] === 'admin' && (!authUser || authUser.role !== 'admin')) {
-    return writeError(c, 403, 'FORBIDDEN', 'cannot grant admin role');
-  }
-  const now = new Date().toISOString();
-  const updateSql = `UPDATE "tags" SET "legacy_id" = ?, "owner_id" = ?, "drink_type" = ?, "tag_group" = ?, "label" = ?, "is_default" = ?, "updated_at" = ? WHERE id = ? RETURNING *`;
-  let updated: any = null;
-  try {
-    updated = await c.env.DB.prepare(updateSql).bind(body['legacy_id'] !== undefined ? body['legacy_id'] : (existing as any)['legacy_id'], body['owner_id'] !== undefined ? body['owner_id'] : (existing as any)['owner_id'], body['drink_type'] !== undefined ? body['drink_type'] : (existing as any)['drink_type'], body['tag_group'] !== undefined ? body['tag_group'] : (existing as any)['tag_group'], body['label'] !== undefined ? body['label'] : (existing as any)['label'], body['is_default'] !== undefined ? body['is_default'] : (existing as any)['is_default'], now, id).first();
-  } catch (err: any) {
-    const errMsg = String(err?.message || err);
-    if (errMsg.includes('UNIQUE constraint failed') || errMsg.includes('SQLITE_CONSTRAINT')) {
-      return writeError(c, 400, 'INVALID_INPUT', `unique constraint failed: ${errMsg}`);
-    }
-    return writeError(c, 400, 'INVALID_INPUT', errMsg);
-  }
-  if (!updated) {
-    return writeError(c, 404, 'NOT_FOUND', 'record not found');
-  }
-  return c.json({ data: sanitizeRecord(updated, []) });
-});
-
-// DELETE /api/tags/:id
-app.delete('/api/tags/:id', async (c) => {
-  const authUser = await getAuthUser(c);
-  if (!authUser) {
-    return writeError(c, 401, 'UNAUTHORIZED', 'authentication required');
-  }
-  const id = c.req.param('id');
-  const parsedId = isNaN(Number(id)) ? id : Number(id);
-  const existing = await c.env.DB.prepare('SELECT * FROM "tags" WHERE id = ?').bind(id).first();
-  if (!existing) {
-    return writeError(c, 404, 'NOT_FOUND', 'record not found');
-  }
-  const ownerVal = (existing as any)['owner_id'];
-  if (ownerVal === null || ownerVal === undefined) {
-    if (authUser.role !== 'admin') {
-      return writeError(c, 403, 'FORBIDDEN', 'forbidden');
-    }
-  } else if (authUser.role !== 'admin' && ownerVal != authUser.id) {
-    return writeError(c, 403, 'FORBIDDEN', 'forbidden');
-  }
-  const res = await c.env.DB.prepare('DELETE FROM "tags" WHERE id = ?').bind(id).run();
-  if (!res.meta.changes) {
-    return writeError(c, 404, 'NOT_FOUND', 'record not found');
-  }
-  return c.json({ data: { deleted: true, id: parsedId } });
-});
-
-// VIEW LIST /view/tags
-app.get('/view/tags', async (c) => {
-  const authUser = await getAuthUser(c);
-  const whereConds: string[] = [];
-  const params: any[] = [];
-  if (!authUser || authUser.role !== 'admin') {
-    if (authUser) {
-      whereConds.push('("owner_id" = ? OR "owner_id" IS NULL)');
-      params.push(authUser.id);
-    } else {
-      whereConds.push('"owner_id" IS NULL');
-    }
-  }
-  const whereClause = whereConds.length > 0 ? ' WHERE ' + whereConds.join(' AND ') : '';
-  const { results } = await c.env.DB.prepare(`SELECT * FROM "tags"${whereClause} ORDER BY id ASC`).bind(...params).all();
-  const viewRecs = (results || []) as any[];
-  const incErr = await processIncludes(c, 'tags', viewRecs, c.req.query('include'), authUser);
-  if (incErr) return incErr;
-  let html = `<!DOCTYPE html><html><head><title>Tag List</title></head><body>`;
-  html += `<h1>Tag List</h1>`;
-  html += `<a href="/view/tags/new">+ New Tag</a><br/><br/><table border="1"><thead><tr><th>id</th>`;
-  html += `<th>legacy_id</th>`;
-  html += `<th>owner_id</th>`;
-  html += `<th>drink_type</th>`;
-  html += `<th>tag_group</th>`;
-  html += `<th>label</th>`;
-  html += `<th>is_default</th>`;
-  html += `<th>Actions</th></tr></thead><tbody>`;
-  for (const row of viewRecs) {
-    html += `<tr><td>${(row as any).id}</td>`;
-    html += `<td>${escapeHTML((row as any)['legacy_id'])}</td>`;
-    html += `<td>${escapeHTML((row as any)['owner_id'])}</td>`;
-    html += `<td>${escapeHTML((row as any)['drink_type'])}</td>`;
-    html += `<td>${escapeHTML((row as any)['tag_group'])}</td>`;
-    html += `<td>${escapeHTML((row as any)['label'])}</td>`;
-    html += `<td>${escapeHTML((row as any)['is_default'])}</td>`;
-    html += `<td><a href="/view/tags/${(row as any).id}">Detail</a> <a href="/view/tags/${(row as any).id}/edit">Edit</a></td></tr>`;
-  }
-  html += `</tbody></table></body></html>`;
-  return c.html(html);
-});
-
-// VIEW NEW /view/tags/new
-app.get('/view/tags/new', async (c) => {
-  let html = `<!DOCTYPE html><html><head><title>New Tag</title></head><body><h1>New Tag</h1><form method="POST" action="/view/tags">`;
-  html += `<label>legacy_id: <input type="text" name="legacy_id" /></label><br/><br/>`;
-  html += `<label>owner_id: <input type="text" name="owner_id" /></label><br/><br/>`;
-  html += `<label>drink_type: <input type="text" name="drink_type" /></label><br/><br/>`;
-  html += `<label>tag_group: <input type="text" name="tag_group" /></label><br/><br/>`;
-  html += `<label>label: <input type="text" name="label" /></label><br/><br/>`;
-  html += `<label>is_default: <input type="text" name="is_default" /></label><br/><br/>`;
-  html += `<button type="submit">Save</button></form></body></html>`;
-  return c.html(html);
-});
-
-// VIEW CREATE SUBMIT /view/tags
-app.post('/view/tags', async (c) => {
-  const formData = await c.req.formData();
-  const body: any = {};
-  formData.forEach((value, key) => { body[key] = value; });
-  const now = new Date().toISOString();
-  const insertSql = `INSERT INTO "tags" ("legacy_id", "owner_id", "drink_type", "tag_group", "label", "is_default", "created_at", "updated_at") VALUES (?, ?, ?, ?, ?, ?, ?, ?)`;
-  await c.env.DB.prepare(insertSql).bind(body['legacy_id'] !== undefined ? body['legacy_id'] : null, body['owner_id'] !== undefined ? body['owner_id'] : null, body['drink_type'] !== undefined ? body['drink_type'] : 'sake', body['tag_group'] !== undefined ? body['tag_group'] : null, body['label'] !== undefined ? body['label'] : null, body['is_default'] !== undefined ? (body['is_default'] ? 1 : 0) : false, now, now).run();
-  return c.redirect('/view/tags', 303);
-});
-
-// VIEW DETAIL /view/tags/:id
-app.get('/view/tags/:id', async (c) => {
-  const id = c.req.param('id');
-  const record = await c.env.DB.prepare('SELECT * FROM "tags" WHERE id = ?').bind(id).first<any>();
-  if (!record) return c.html('<h1>404 Not Found</h1>', 404);
-  const authUser = await getAuthUser(c);
-  const incErr = await processIncludes(c, 'tags', [record], c.req.query('include'), authUser);
-  if (incErr) return incErr;
-  let html = `<!DOCTYPE html><html><head><title>Tag Detail</title></head><body><h1>Tag #${id}</h1><dl>`;
-  html += `<dt>legacy_id</dt><dd>${escapeHTML(record['legacy_id'])}</dd>`;
-  html += `<dt>owner_id</dt><dd>${escapeHTML(record['owner_id'])}</dd>`;
-  html += `<dt>drink_type</dt><dd>${escapeHTML(record['drink_type'])}</dd>`;
-  html += `<dt>tag_group</dt><dd>${escapeHTML(record['tag_group'])}</dd>`;
-  html += `<dt>label</dt><dd>${escapeHTML(record['label'])}</dd>`;
-  html += `<dt>is_default</dt><dd>${escapeHTML(record['is_default'])}</dd>`;
-  html += `</dl></body></html>`;
-  return c.html(html);
-});
-
-// LIST /api/users
-app.get('/api/users', async (c) => {
-  const authUser = await getAuthUser(c);
-  if (!authUser) {
-    return writeError(c, 401, 'UNAUTHORIZED', 'authentication required');
-  }
-  const limit = Math.min(parseInt(c.req.query('limit') || '20', 10), 100);
-  const offset = Math.max(parseInt(c.req.query('offset') || '0', 10), 0);
-
-  const whereConds: string[] = [];
-  const params: any[] = [];
-  const whereClause = whereConds.length > 0 ? ' WHERE ' + whereConds.join(' AND ') : '';
-  const countSql = `SELECT COUNT(*) as total FROM "users"${whereClause}`;
-  const countStmt = await c.env.DB.prepare(countSql).bind(...params).first<{ total: number }>();
-  const total = countStmt ? countStmt.total : 0;
-  const querySql = `SELECT * FROM "users"${whereClause} ORDER BY id ASC LIMIT ? OFFSET ?`;
-  const { results } = await c.env.DB.prepare(querySql).bind(...params, limit, offset).all();
-  const sanitized = (results || []).map((r: any) => sanitizeRecord(r, []));
-  const incErr = await processIncludes(c, 'users', sanitized, c.req.query('include'), authUser);
-  if (incErr) return incErr;
-  return c.json({
-    data: sanitized,
-    meta: { total, limit, offset }
-  });
-});
-
-// DETAIL /api/users/:id
-app.get('/api/users/:id', async (c) => {
-  const authUser = await getAuthUser(c);
-  if (!authUser) {
-    return writeError(c, 401, 'UNAUTHORIZED', 'authentication required');
-  }
-  const id = c.req.param('id');
-  const record = await c.env.DB.prepare('SELECT * FROM "users" WHERE id = ?').bind(id).first();
-  if (!record) {
-    return writeError(c, 404, 'NOT_FOUND', 'record not found');
-  }
-  const sanitized = sanitizeRecord(record, []);
-  const incErr = await processIncludes(c, 'users', [sanitized], c.req.query('include'), authUser);
-  if (incErr) return incErr;
-  return c.json({ data: sanitized });
-});
-
-// CREATE /api/users
-app.post('/api/users', async (c) => {
-  const authUser = await getAuthUser(c);
-  let body: any = {};
-  let formData: FormData | null = null;
-  const rawHeader = c.req.header('content-type') || c.req.header('Content-Type') || (c.req.raw && c.req.raw.headers ? c.req.raw.headers.get('content-type') : '') || '';
-  const contentType = String(rawHeader).toLowerCase();
-  if (contentType.includes('multipart/form-data')) {
-    try {
-      formData = await c.req.formData();
-      formData.forEach((val, key) => {
-        if (typeof val === 'string') { body[key] = (val !== '' && !isNaN(Number(val))) ? Number(val) : val; }
-      });
-    } catch (e) {
-      return writeError(c, 400, 'INVALID_MULTIPART', 'failed to parse multipart body');
-    }
-  } else {
-    try {
-      body = await c.req.json();
-    } catch (e) {
-      return writeError(c, 400, 'INVALID_JSON', 'failed to parse json body');
-    }
-  }
-
-  if (body['role'] === 'admin' && (!authUser || authUser.role !== 'admin')) {
-    return writeError(c, 403, 'FORBIDDEN', 'cannot grant admin role');
-  }
-  if (body['provider'] === undefined || body['provider'] === null) {
-    return writeError(c, 400, 'VALIDATION_FAILED', 'field provider is required');
-  }
-  if (body['provider'] !== undefined && body['provider'] !== null && typeof body['provider'] !== 'string') {
-    return writeError(c, 400, 'VALIDATION_FAILED', 'field provider must be a string');
-  }
-  if (body['provider_user_id'] === undefined || body['provider_user_id'] === null) {
-    return writeError(c, 400, 'VALIDATION_FAILED', 'field provider_user_id is required');
-  }
-  if (body['provider_user_id'] !== undefined && body['provider_user_id'] !== null && typeof body['provider_user_id'] !== 'string') {
-    return writeError(c, 400, 'VALIDATION_FAILED', 'field provider_user_id must be a string');
-  }
-  if (body['email'] !== undefined && body['email'] !== null && typeof body['email'] !== 'string') {
-    return writeError(c, 400, 'VALIDATION_FAILED', 'field email must be a string');
-  }
-  if (body['display_name'] !== undefined && body['display_name'] !== null && typeof body['display_name'] !== 'string') {
-    return writeError(c, 400, 'VALIDATION_FAILED', 'field display_name must be a string');
-  }
-  if (body['avatar_url'] !== undefined && body['avatar_url'] !== null && typeof body['avatar_url'] !== 'string') {
-    return writeError(c, 400, 'VALIDATION_FAILED', 'field avatar_url must be a string');
-  }
-
-  const now = new Date().toISOString();
-  const insertSql = `INSERT INTO "users" ("provider", "provider_user_id", "email", "display_name", "avatar_url", "last_login_at", "role", "created_at", "updated_at") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`;
-  let created: any = null;
-  try {
-    created = await c.env.DB.prepare(insertSql).bind(body['provider'] !== undefined ? body['provider'] : null, body['provider_user_id'] !== undefined ? body['provider_user_id'] : null, body['email'] !== undefined ? body['email'] : null, body['display_name'] !== undefined ? body['display_name'] : null, body['avatar_url'] !== undefined ? body['avatar_url'] : null, body['last_login_at'] !== undefined ? body['last_login_at'] : null, body['role'] !== undefined ? body['role'] : 'user', now, now).first<any>();
-  } catch (err: any) {
-    const errMsg = String(err?.message || err);
-    if (errMsg.includes('UNIQUE constraint failed') || errMsg.includes('SQLITE_CONSTRAINT')) {
-      return writeError(c, 400, 'INVALID_INPUT', `unique constraint failed: ${errMsg}`);
-    }
-    return writeError(c, 400, 'INVALID_INPUT', errMsg);
-  }
-  return c.json({ data: sanitizeRecord(created, []) }, 201);
-});
-
-// UPDATE /api/users/:id
-app.put('/api/users/:id', async (c) => {
-  const authUser = await getAuthUser(c);
-  if (!authUser) {
-    return writeError(c, 401, 'UNAUTHORIZED', 'authentication required');
-  }
-  const id = c.req.param('id');
-  const existing = await c.env.DB.prepare('SELECT * FROM "users" WHERE id = ?').bind(id).first();
-  if (!existing) {
-    return writeError(c, 404, 'NOT_FOUND', 'record not found');
-  }
-  const ownerVal = (existing as any)['id'];
-  if (ownerVal === null || ownerVal === undefined) {
-    if (authUser.role !== 'admin') {
-      return writeError(c, 403, 'FORBIDDEN', 'forbidden');
-    }
-  } else if (authUser.role !== 'admin' && ownerVal != authUser.id) {
-    return writeError(c, 403, 'FORBIDDEN', 'forbidden');
-  }
-  let body: any;
-  try {
-    body = await c.req.json();
-  } catch (e) {
-    return writeError(c, 400, 'INVALID_JSON', 'failed to parse json body');
-  }
-
-  if (body['role'] !== undefined && body['role'] !== (existing as any)['role'] && body['role'] === 'admin' && (!authUser || authUser.role !== 'admin')) {
-    return writeError(c, 403, 'FORBIDDEN', 'cannot grant admin role');
-  }
-  const now = new Date().toISOString();
-  const updateSql = `UPDATE "users" SET "provider" = ?, "provider_user_id" = ?, "email" = ?, "display_name" = ?, "avatar_url" = ?, "last_login_at" = ?, "role" = ?, "updated_at" = ? WHERE id = ? RETURNING *`;
-  let updated: any = null;
-  try {
-    updated = await c.env.DB.prepare(updateSql).bind(body['provider'] !== undefined ? body['provider'] : (existing as any)['provider'], body['provider_user_id'] !== undefined ? body['provider_user_id'] : (existing as any)['provider_user_id'], body['email'] !== undefined ? body['email'] : (existing as any)['email'], body['display_name'] !== undefined ? body['display_name'] : (existing as any)['display_name'], body['avatar_url'] !== undefined ? body['avatar_url'] : (existing as any)['avatar_url'], body['last_login_at'] !== undefined ? body['last_login_at'] : (existing as any)['last_login_at'], body['role'] !== undefined ? body['role'] : (existing as any)['role'], now, id).first();
-  } catch (err: any) {
-    const errMsg = String(err?.message || err);
-    if (errMsg.includes('UNIQUE constraint failed') || errMsg.includes('SQLITE_CONSTRAINT')) {
-      return writeError(c, 400, 'INVALID_INPUT', `unique constraint failed: ${errMsg}`);
-    }
-    return writeError(c, 400, 'INVALID_INPUT', errMsg);
-  }
-  if (!updated) {
-    return writeError(c, 404, 'NOT_FOUND', 'record not found');
-  }
-  return c.json({ data: sanitizeRecord(updated, []) });
-});
-
-// DELETE /api/users/:id
-app.delete('/api/users/:id', async (c) => {
-  const authUser = await getAuthUser(c);
-  if (!authUser) {
-    return writeError(c, 401, 'UNAUTHORIZED', 'authentication required');
-  }
-  const id = c.req.param('id');
-  const parsedId = isNaN(Number(id)) ? id : Number(id);
-  const existing = await c.env.DB.prepare('SELECT * FROM "users" WHERE id = ?').bind(id).first();
-  if (!existing) {
-    return writeError(c, 404, 'NOT_FOUND', 'record not found');
-  }
-  if (!authUser || authUser.role !== 'admin') {
-    return writeError(c, 403, 'FORBIDDEN', 'forbidden');
-  }
-  const res = await c.env.DB.prepare('DELETE FROM "users" WHERE id = ?').bind(id).run();
-  if (!res.meta.changes) {
-    return writeError(c, 404, 'NOT_FOUND', 'record not found');
-  }
-  return c.json({ data: { deleted: true, id: parsedId } });
-});
-
-// VIEW LIST /view/users
-app.get('/view/users', async (c) => {
-  const authUser = await getAuthUser(c);
-  const whereConds: string[] = [];
-  const params: any[] = [];
-  const whereClause = whereConds.length > 0 ? ' WHERE ' + whereConds.join(' AND ') : '';
-  const { results } = await c.env.DB.prepare(`SELECT * FROM "users"${whereClause} ORDER BY id ASC`).bind(...params).all();
-  const viewRecs = (results || []) as any[];
-  const incErr = await processIncludes(c, 'users', viewRecs, c.req.query('include'), authUser);
-  if (incErr) return incErr;
-  let html = `<!DOCTYPE html><html><head><title>User List</title></head><body>`;
-  html += `<h1>User List</h1>`;
-  html += `<a href="/view/users/new">+ New User</a><br/><br/><table border="1"><thead><tr><th>id</th>`;
-  html += `<th>provider</th>`;
-  html += `<th>provider_user_id</th>`;
-  html += `<th>email</th>`;
-  html += `<th>display_name</th>`;
-  html += `<th>avatar_url</th>`;
-  html += `<th>last_login_at</th>`;
-  html += `<th>role</th>`;
-  html += `<th>Actions</th></tr></thead><tbody>`;
-  for (const row of viewRecs) {
-    html += `<tr><td>${(row as any).id}</td>`;
-    html += `<td>${escapeHTML((row as any)['provider'])}</td>`;
-    html += `<td>${escapeHTML((row as any)['provider_user_id'])}</td>`;
-    html += `<td>${escapeHTML((row as any)['email'])}</td>`;
-    html += `<td>${escapeHTML((row as any)['display_name'])}</td>`;
-    html += `<td>${escapeHTML((row as any)['avatar_url'])}</td>`;
-    html += `<td>${escapeHTML((row as any)['last_login_at'])}</td>`;
-    html += `<td>${escapeHTML((row as any)['role'])}</td>`;
-    html += `<td><a href="/view/users/${(row as any).id}">Detail</a> <a href="/view/users/${(row as any).id}/edit">Edit</a></td></tr>`;
-  }
-  html += `</tbody></table></body></html>`;
-  return c.html(html);
-});
-
-// VIEW NEW /view/users/new
-app.get('/view/users/new', async (c) => {
-  let html = `<!DOCTYPE html><html><head><title>New User</title></head><body><h1>New User</h1><form method="POST" action="/view/users">`;
-  html += `<label>provider: <input type="text" name="provider" /></label><br/><br/>`;
-  html += `<label>provider_user_id: <input type="text" name="provider_user_id" /></label><br/><br/>`;
-  html += `<label>email: <input type="text" name="email" /></label><br/><br/>`;
-  html += `<label>display_name: <input type="text" name="display_name" /></label><br/><br/>`;
-  html += `<label>avatar_url: <input type="text" name="avatar_url" /></label><br/><br/>`;
-  html += `<label>last_login_at: <input type="text" name="last_login_at" /></label><br/><br/>`;
-  html += `<label>role: <input type="text" name="role" /></label><br/><br/>`;
-  html += `<button type="submit">Save</button></form></body></html>`;
-  return c.html(html);
-});
-
-// VIEW CREATE SUBMIT /view/users
-app.post('/view/users', async (c) => {
-  const formData = await c.req.formData();
-  const body: any = {};
-  formData.forEach((value, key) => { body[key] = value; });
-  const now = new Date().toISOString();
-  const insertSql = `INSERT INTO "users" ("provider", "provider_user_id", "email", "display_name", "avatar_url", "last_login_at", "role", "created_at", "updated_at") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`;
-  await c.env.DB.prepare(insertSql).bind(body['provider'] !== undefined ? body['provider'] : null, body['provider_user_id'] !== undefined ? body['provider_user_id'] : null, body['email'] !== undefined ? body['email'] : null, body['display_name'] !== undefined ? body['display_name'] : null, body['avatar_url'] !== undefined ? body['avatar_url'] : null, body['last_login_at'] !== undefined ? body['last_login_at'] : null, body['role'] !== undefined ? body['role'] : 'user', now, now).run();
-  return c.redirect('/view/users', 303);
-});
-
-// VIEW DETAIL /view/users/:id
-app.get('/view/users/:id', async (c) => {
-  const id = c.req.param('id');
-  const record = await c.env.DB.prepare('SELECT * FROM "users" WHERE id = ?').bind(id).first<any>();
-  if (!record) return c.html('<h1>404 Not Found</h1>', 404);
-  const authUser = await getAuthUser(c);
-  const incErr = await processIncludes(c, 'users', [record], c.req.query('include'), authUser);
-  if (incErr) return incErr;
-  let html = `<!DOCTYPE html><html><head><title>User Detail</title></head><body><h1>User #${id}</h1><dl>`;
-  html += `<dt>provider</dt><dd>${escapeHTML(record['provider'])}</dd>`;
-  html += `<dt>provider_user_id</dt><dd>${escapeHTML(record['provider_user_id'])}</dd>`;
-  html += `<dt>email</dt><dd>${escapeHTML(record['email'])}</dd>`;
-  html += `<dt>display_name</dt><dd>${escapeHTML(record['display_name'])}</dd>`;
-  html += `<dt>avatar_url</dt><dd>${escapeHTML(record['avatar_url'])}</dd>`;
-  html += `<dt>last_login_at</dt><dd>${escapeHTML(record['last_login_at'])}</dd>`;
-  html += `<dt>role</dt><dd>${escapeHTML(record['role'])}</dd>`;
-  html += `</dl></body></html>`;
-  return c.html(html);
-});
 
 // LIST /api/record_tags
 app.get('/api/record_tags', async (c) => {
@@ -834,16 +337,16 @@ app.post('/api/record_tags', async (c) => {
     return writeError(c, 403, 'FORBIDDEN', 'cannot grant admin role');
   }
   if (body['sake_record_id'] === undefined || body['sake_record_id'] === null) {
-    return writeError(c, 400, 'VALIDATION_FAILED', 'field sake_record_id is required');
+    return writeError(c, 400, 'VALIDATION_FAILED', `field sake_record_id is required`);
   }
   if (body['sake_record_id'] !== undefined && body['sake_record_id'] !== null && typeof body['sake_record_id'] !== 'number') {
-    return writeError(c, 400, 'VALIDATION_FAILED', 'field sake_record_id must be a number');
+    return writeError(c, 400, 'VALIDATION_FAILED', `field sake_record_id must be a number`);
   }
   if (body['tag_id'] === undefined || body['tag_id'] === null) {
-    return writeError(c, 400, 'VALIDATION_FAILED', 'field tag_id is required');
+    return writeError(c, 400, 'VALIDATION_FAILED', `field tag_id is required`);
   }
   if (body['tag_id'] !== undefined && body['tag_id'] !== null && typeof body['tag_id'] !== 'string') {
-    return writeError(c, 400, 'VALIDATION_FAILED', 'field tag_id must be a string');
+    return writeError(c, 400, 'VALIDATION_FAILED', `field tag_id must be a string`);
   }
 
   const now = new Date().toISOString();
@@ -881,6 +384,12 @@ app.put('/api/record_tags/:id', async (c) => {
 
   if (body['role'] !== undefined && body['role'] !== (existing as any)['role'] && body['role'] === 'admin' && (!authUser || authUser.role !== 'admin')) {
     return writeError(c, 403, 'FORBIDDEN', 'cannot grant admin role');
+  }
+  if (body['sake_record_id'] !== undefined && body['sake_record_id'] !== null && typeof body['sake_record_id'] !== 'number') {
+    return writeError(c, 400, 'VALIDATION_FAILED', `field sake_record_id must be a number`);
+  }
+  if (body['tag_id'] !== undefined && body['tag_id'] !== null && typeof body['tag_id'] !== 'string') {
+    return writeError(c, 400, 'VALIDATION_FAILED', `field tag_id must be a string`);
   }
   const now = new Date().toISOString();
   const updateSql = `UPDATE "record_tags" SET "sake_record_id" = ?, "tag_id" = ?, "updated_at" = ? WHERE id = ? RETURNING *`;
@@ -1070,34 +579,34 @@ app.post('/api/sake_images', async (c) => {
     delete body['owner_id'];
   }
   if (body['legacy_id'] !== undefined && body['legacy_id'] !== null && typeof body['legacy_id'] !== 'string') {
-    return writeError(c, 400, 'VALIDATION_FAILED', 'field legacy_id must be a string');
+    return writeError(c, 400, 'VALIDATION_FAILED', `field legacy_id must be a string`);
   }
   if (body['owner_id'] === undefined || body['owner_id'] === null) {
-    return writeError(c, 400, 'VALIDATION_FAILED', 'field owner_id is required');
+    return writeError(c, 400, 'VALIDATION_FAILED', `field owner_id is required`);
   }
   if (body['owner_id'] !== undefined && body['owner_id'] !== null && typeof body['owner_id'] !== 'string') {
-    return writeError(c, 400, 'VALIDATION_FAILED', 'field owner_id must be a string');
+    return writeError(c, 400, 'VALIDATION_FAILED', `field owner_id must be a string`);
   }
   if (body['record_id'] === undefined || body['record_id'] === null) {
-    return writeError(c, 400, 'VALIDATION_FAILED', 'field record_id is required');
+    return writeError(c, 400, 'VALIDATION_FAILED', `field record_id is required`);
   }
   if (body['record_id'] !== undefined && body['record_id'] !== null && typeof body['record_id'] !== 'number') {
-    return writeError(c, 400, 'VALIDATION_FAILED', 'field record_id must be a number');
+    return writeError(c, 400, 'VALIDATION_FAILED', `field record_id must be a number`);
   }
   if (body['mime_type'] === undefined || body['mime_type'] === null) {
-    return writeError(c, 400, 'VALIDATION_FAILED', 'field mime_type is required');
+    return writeError(c, 400, 'VALIDATION_FAILED', `field mime_type is required`);
   }
   if (body['mime_type'] !== undefined && body['mime_type'] !== null && typeof body['mime_type'] !== 'string') {
-    return writeError(c, 400, 'VALIDATION_FAILED', 'field mime_type must be a string');
+    return writeError(c, 400, 'VALIDATION_FAILED', `field mime_type must be a string`);
   }
   if (body['file_name'] === undefined || body['file_name'] === null) {
-    return writeError(c, 400, 'VALIDATION_FAILED', 'field file_name is required');
+    return writeError(c, 400, 'VALIDATION_FAILED', `field file_name is required`);
   }
   if (body['file_name'] !== undefined && body['file_name'] !== null && typeof body['file_name'] !== 'string') {
-    return writeError(c, 400, 'VALIDATION_FAILED', 'field file_name must be a string');
+    return writeError(c, 400, 'VALIDATION_FAILED', `field file_name must be a string`);
   }
   if (body['display_order'] !== undefined && body['display_order'] !== null && typeof body['display_order'] !== 'number') {
-    return writeError(c, 400, 'VALIDATION_FAILED', 'field display_order must be a number');
+    return writeError(c, 400, 'VALIDATION_FAILED', `field display_order must be a number`);
   }
 
   const now = new Date().toISOString();
@@ -1217,6 +726,24 @@ app.put('/api/sake_images/:id', async (c) => {
 
   if (body['role'] !== undefined && body['role'] !== (existing as any)['role'] && body['role'] === 'admin' && (!authUser || authUser.role !== 'admin')) {
     return writeError(c, 403, 'FORBIDDEN', 'cannot grant admin role');
+  }
+  if (body['legacy_id'] !== undefined && body['legacy_id'] !== null && typeof body['legacy_id'] !== 'string') {
+    return writeError(c, 400, 'VALIDATION_FAILED', `field legacy_id must be a string`);
+  }
+  if (body['owner_id'] !== undefined && body['owner_id'] !== null && typeof body['owner_id'] !== 'string') {
+    return writeError(c, 400, 'VALIDATION_FAILED', `field owner_id must be a string`);
+  }
+  if (body['record_id'] !== undefined && body['record_id'] !== null && typeof body['record_id'] !== 'number') {
+    return writeError(c, 400, 'VALIDATION_FAILED', `field record_id must be a number`);
+  }
+  if (body['mime_type'] !== undefined && body['mime_type'] !== null && typeof body['mime_type'] !== 'string') {
+    return writeError(c, 400, 'VALIDATION_FAILED', `field mime_type must be a string`);
+  }
+  if (body['file_name'] !== undefined && body['file_name'] !== null && typeof body['file_name'] !== 'string') {
+    return writeError(c, 400, 'VALIDATION_FAILED', `field file_name must be a string`);
+  }
+  if (body['display_order'] !== undefined && body['display_order'] !== null && typeof body['display_order'] !== 'number') {
+    return writeError(c, 400, 'VALIDATION_FAILED', `field display_order must be a number`);
   }
   const now = new Date().toISOString();
   const updateSql = `UPDATE "sake_images" SET "legacy_id" = ?, "owner_id" = ?, "record_id" = ?, "image_key" = ?, "thumbnail_key" = ?, "mime_type" = ?, "file_name" = ?, "display_order" = ?, "updated_at" = ? WHERE id = ? RETURNING *`;
@@ -1619,74 +1146,191 @@ app.post('/api/sake_records', async (c) => {
   } else {
     delete body['owner_id'];
   }
+
+  // 1. Extract and pre-validate nested writes for has_many relations
+  const nestedWrites: { relName: string; targetTable: string; fkField: string; items: any[]; targetPwdFields: string[] }[] = [];
+
+  if (body['images'] !== undefined && body['images'] !== null) {
+    if (!Array.isArray(body['images'])) {
+      return writeError(c, 400, 'INVALID_INPUT', "nested relation 'images' must be an array of objects");
+    }
+    const rawItems_images = body['images'];
+    if (rawItems_images.length > 50) {
+      return writeError(c, 400, 'NESTED_WRITE_TOO_LARGE', "nested records for relation 'images' exceed limit of 50");
+    }
+    if (!authUser) {
+      return writeError(c, 401, 'UNAUTHORIZED', 'authentication required');
+    }
+    for (let idx = 0; idx < rawItems_images.length; idx++) {
+      const item = rawItems_images[idx];
+      if (typeof item !== 'object' || item === null || Array.isArray(item)) {
+        return writeError(c, 400, 'INVALID_INPUT', `nested record #${idx+1} in 'images' must be a JSON object`);
+      }
+      if (item['legacy_id'] !== undefined && item['legacy_id'] !== null && typeof item['legacy_id'] !== 'string') {
+        return writeError(c, 400, 'VALIDATION_FAILED', `nested record #${idx+1} in 'images': field legacy_id must be a string`);
+      }
+      if (item['owner_id'] !== undefined && item['owner_id'] !== null && typeof item['owner_id'] !== 'string') {
+        return writeError(c, 400, 'VALIDATION_FAILED', `nested record #${idx+1} in 'images': field owner_id must be a string`);
+      }
+      if (item['record_id'] !== undefined && item['record_id'] !== null && typeof item['record_id'] !== 'number') {
+        return writeError(c, 400, 'VALIDATION_FAILED', `nested record #${idx+1} in 'images': field record_id must be a number`);
+      }
+      if (item['mime_type'] === undefined || item['mime_type'] === null) {
+        return writeError(c, 400, 'VALIDATION_FAILED', `nested record #${idx+1} in 'images': field mime_type is required`);
+      }
+      if (item['mime_type'] !== undefined && item['mime_type'] !== null && typeof item['mime_type'] !== 'string') {
+        return writeError(c, 400, 'VALIDATION_FAILED', `nested record #${idx+1} in 'images': field mime_type must be a string`);
+      }
+      if (item['file_name'] === undefined || item['file_name'] === null) {
+        return writeError(c, 400, 'VALIDATION_FAILED', `nested record #${idx+1} in 'images': field file_name is required`);
+      }
+      if (item['file_name'] !== undefined && item['file_name'] !== null && typeof item['file_name'] !== 'string') {
+        return writeError(c, 400, 'VALIDATION_FAILED', `nested record #${idx+1} in 'images': field file_name must be a string`);
+      }
+      if (item['display_order'] !== undefined && item['display_order'] !== null && typeof item['display_order'] !== 'number') {
+        return writeError(c, 400, 'VALIDATION_FAILED', `nested record #${idx+1} in 'images': field display_order must be a number`);
+      }
+    }
+    nestedWrites.push({ relName: 'images', targetTable: 'sake_images', fkField: 'record_id', items: rawItems_images, targetPwdFields: [] });
+    delete body['images'];
+  }
+
+  if (body['record_tags'] !== undefined && body['record_tags'] !== null) {
+    if (!Array.isArray(body['record_tags'])) {
+      return writeError(c, 400, 'INVALID_INPUT', "nested relation 'record_tags' must be an array of objects");
+    }
+    const rawItems_record_tags = body['record_tags'];
+    if (rawItems_record_tags.length > 50) {
+      return writeError(c, 400, 'NESTED_WRITE_TOO_LARGE', "nested records for relation 'record_tags' exceed limit of 50");
+    }
+    if (!authUser) {
+      return writeError(c, 401, 'UNAUTHORIZED', 'authentication required');
+    }
+    for (let idx = 0; idx < rawItems_record_tags.length; idx++) {
+      const item = rawItems_record_tags[idx];
+      if (typeof item !== 'object' || item === null || Array.isArray(item)) {
+        return writeError(c, 400, 'INVALID_INPUT', `nested record #${idx+1} in 'record_tags' must be a JSON object`);
+      }
+      if (item['sake_record_id'] !== undefined && item['sake_record_id'] !== null && typeof item['sake_record_id'] !== 'number') {
+        return writeError(c, 400, 'VALIDATION_FAILED', `nested record #${idx+1} in 'record_tags': field sake_record_id must be a number`);
+      }
+      if (item['tag_id'] === undefined || item['tag_id'] === null) {
+        return writeError(c, 400, 'VALIDATION_FAILED', `nested record #${idx+1} in 'record_tags': field tag_id is required`);
+      }
+      if (item['tag_id'] !== undefined && item['tag_id'] !== null && typeof item['tag_id'] !== 'string') {
+        return writeError(c, 400, 'VALIDATION_FAILED', `nested record #${idx+1} in 'record_tags': field tag_id must be a string`);
+      }
+    }
+    nestedWrites.push({ relName: 'record_tags', targetTable: 'record_tags', fkField: 'sake_record_id', items: rawItems_record_tags, targetPwdFields: [] });
+    delete body['record_tags'];
+  }
   if (body['legacy_id'] !== undefined && body['legacy_id'] !== null && typeof body['legacy_id'] !== 'string') {
-    return writeError(c, 400, 'VALIDATION_FAILED', 'field legacy_id must be a string');
+    return writeError(c, 400, 'VALIDATION_FAILED', `field legacy_id must be a string`);
   }
   if (body['owner_id'] === undefined || body['owner_id'] === null) {
-    return writeError(c, 400, 'VALIDATION_FAILED', 'field owner_id is required');
+    return writeError(c, 400, 'VALIDATION_FAILED', `field owner_id is required`);
   }
   if (body['owner_id'] !== undefined && body['owner_id'] !== null && typeof body['owner_id'] !== 'string') {
-    return writeError(c, 400, 'VALIDATION_FAILED', 'field owner_id must be a string');
+    return writeError(c, 400, 'VALIDATION_FAILED', `field owner_id must be a string`);
   }
   if (body['drink_type'] !== undefined && body['drink_type'] !== null && typeof body['drink_type'] !== 'string') {
-    return writeError(c, 400, 'VALIDATION_FAILED', 'field drink_type must be a string');
+    return writeError(c, 400, 'VALIDATION_FAILED', `field drink_type must be a string`);
   }
   if (body['name'] === undefined || body['name'] === null) {
-    return writeError(c, 400, 'VALIDATION_FAILED', 'field name is required');
+    return writeError(c, 400, 'VALIDATION_FAILED', `field name is required`);
   }
   if (body['name'] !== undefined && body['name'] !== null && typeof body['name'] !== 'string') {
-    return writeError(c, 400, 'VALIDATION_FAILED', 'field name must be a string');
+    return writeError(c, 400, 'VALIDATION_FAILED', `field name must be a string`);
+  }
+  if (body['name'] !== undefined && body['name'] !== null && body['name'].length < 1) {
+    return writeError(c, 400, 'VALIDATION_FAILED', `field 'name' length is less than min_length 1`);
   }
   if (body['region'] !== undefined && body['region'] !== null && typeof body['region'] !== 'string') {
-    return writeError(c, 400, 'VALIDATION_FAILED', 'field region must be a string');
+    return writeError(c, 400, 'VALIDATION_FAILED', `field region must be a string`);
   }
   if (body['brewery'] !== undefined && body['brewery'] !== null && typeof body['brewery'] !== 'string') {
-    return writeError(c, 400, 'VALIDATION_FAILED', 'field brewery must be a string');
+    return writeError(c, 400, 'VALIDATION_FAILED', `field brewery must be a string`);
   }
   if (body['rice'] !== undefined && body['rice'] !== null && typeof body['rice'] !== 'string') {
-    return writeError(c, 400, 'VALIDATION_FAILED', 'field rice must be a string');
+    return writeError(c, 400, 'VALIDATION_FAILED', `field rice must be a string`);
   }
   if (body['sake_type'] !== undefined && body['sake_type'] !== null && typeof body['sake_type'] !== 'string') {
-    return writeError(c, 400, 'VALIDATION_FAILED', 'field sake_type must be a string');
+    return writeError(c, 400, 'VALIDATION_FAILED', `field sake_type must be a string`);
   }
   if (body['sake_meter_value'] !== undefined && body['sake_meter_value'] !== null && typeof body['sake_meter_value'] !== 'string') {
-    return writeError(c, 400, 'VALIDATION_FAILED', 'field sake_meter_value must be a string');
+    return writeError(c, 400, 'VALIDATION_FAILED', `field sake_meter_value must be a string`);
   }
   if (body['abv'] !== undefined && body['abv'] !== null && typeof body['abv'] !== 'string') {
-    return writeError(c, 400, 'VALIDATION_FAILED', 'field abv must be a string');
+    return writeError(c, 400, 'VALIDATION_FAILED', `field abv must be a string`);
   }
   if (body['volume'] !== undefined && body['volume'] !== null && typeof body['volume'] !== 'string') {
-    return writeError(c, 400, 'VALIDATION_FAILED', 'field volume must be a string');
+    return writeError(c, 400, 'VALIDATION_FAILED', `field volume must be a string`);
   }
   if (body['price'] !== undefined && body['price'] !== null && typeof body['price'] !== 'string') {
-    return writeError(c, 400, 'VALIDATION_FAILED', 'field price must be a string');
+    return writeError(c, 400, 'VALIDATION_FAILED', `field price must be a string`);
   }
   if (body['one_line_note'] !== undefined && body['one_line_note'] !== null && typeof body['one_line_note'] !== 'string') {
-    return writeError(c, 400, 'VALIDATION_FAILED', 'field one_line_note must be a string');
+    return writeError(c, 400, 'VALIDATION_FAILED', `field one_line_note must be a string`);
   }
   if (body['place'] !== undefined && body['place'] !== null && typeof body['place'] !== 'string') {
-    return writeError(c, 400, 'VALIDATION_FAILED', 'field place must be a string');
+    return writeError(c, 400, 'VALIDATION_FAILED', `field place must be a string`);
   }
   if (body['consumed_date'] === undefined || body['consumed_date'] === null) {
-    return writeError(c, 400, 'VALIDATION_FAILED', 'field consumed_date is required');
+    return writeError(c, 400, 'VALIDATION_FAILED', `field consumed_date is required`);
+  }
+  if (body['consumed_date'] !== undefined && body['consumed_date'] !== null && (typeof body['consumed_date'] !== 'string' || isNaN(Date.parse(body['consumed_date'])))) {
+    return writeError(c, 400, 'VALIDATION_FAILED', `field consumed_date must be a valid datetime`);
   }
   if (body['companions'] !== undefined && body['companions'] !== null && typeof body['companions'] !== 'string') {
-    return writeError(c, 400, 'VALIDATION_FAILED', 'field companions must be a string');
+    return writeError(c, 400, 'VALIDATION_FAILED', `field companions must be a string`);
   }
   if (body['food_pairing'] !== undefined && body['food_pairing'] !== null && typeof body['food_pairing'] !== 'string') {
-    return writeError(c, 400, 'VALIDATION_FAILED', 'field food_pairing must be a string');
+    return writeError(c, 400, 'VALIDATION_FAILED', `field food_pairing must be a string`);
+  }
+  if (body['drink_again'] !== undefined && body['drink_again'] !== null) {
+    if (typeof body['drink_again'] !== 'string') {
+      return writeError(c, 400, 'VALIDATION_FAILED', `field drink_again must be a string`);
+    }
+    const allowed_drink_again = ['no', 'unsure', 'yes'];
+    if (!allowed_drink_again.includes(body['drink_again'])) {
+      return writeError(c, 400, 'VALIDATION_FAILED', `field drink_again value '${body['drink_again']}' is not in allowed enum values ${JSON.stringify(['no', 'unsure', 'yes'])}`);
+    }
   }
   if (body['sweet_dry'] !== undefined && body['sweet_dry'] !== null && typeof body['sweet_dry'] !== 'number') {
-    return writeError(c, 400, 'VALIDATION_FAILED', 'field sweet_dry must be a number');
+    return writeError(c, 400, 'VALIDATION_FAILED', `field sweet_dry must be a number`);
+  }
+  if (body['sweet_dry'] !== undefined && body['sweet_dry'] !== null && body['sweet_dry'] < 1) {
+    return writeError(c, 400, 'VALIDATION_FAILED', `field 'sweet_dry' is less than min 1`);
+  }
+  if (body['sweet_dry'] !== undefined && body['sweet_dry'] !== null && body['sweet_dry'] > 5) {
+    return writeError(c, 400, 'VALIDATION_FAILED', `field 'sweet_dry' is greater than max 5`);
   }
   if (body['aroma_intensity'] !== undefined && body['aroma_intensity'] !== null && typeof body['aroma_intensity'] !== 'number') {
-    return writeError(c, 400, 'VALIDATION_FAILED', 'field aroma_intensity must be a number');
+    return writeError(c, 400, 'VALIDATION_FAILED', `field aroma_intensity must be a number`);
+  }
+  if (body['aroma_intensity'] !== undefined && body['aroma_intensity'] !== null && body['aroma_intensity'] < 1) {
+    return writeError(c, 400, 'VALIDATION_FAILED', `field 'aroma_intensity' is less than min 1`);
+  }
+  if (body['aroma_intensity'] !== undefined && body['aroma_intensity'] !== null && body['aroma_intensity'] > 3) {
+    return writeError(c, 400, 'VALIDATION_FAILED', `field 'aroma_intensity' is greater than max 3`);
   }
   if (body['acidity'] !== undefined && body['acidity'] !== null && typeof body['acidity'] !== 'number') {
-    return writeError(c, 400, 'VALIDATION_FAILED', 'field acidity must be a number');
+    return writeError(c, 400, 'VALIDATION_FAILED', `field acidity must be a number`);
+  }
+  if (body['acidity'] !== undefined && body['acidity'] !== null && body['acidity'] < 1) {
+    return writeError(c, 400, 'VALIDATION_FAILED', `field 'acidity' is less than min 1`);
+  }
+  if (body['acidity'] !== undefined && body['acidity'] !== null && body['acidity'] > 3) {
+    return writeError(c, 400, 'VALIDATION_FAILED', `field 'acidity' is greater than max 3`);
   }
   if (body['clean_umami'] !== undefined && body['clean_umami'] !== null && typeof body['clean_umami'] !== 'number') {
-    return writeError(c, 400, 'VALIDATION_FAILED', 'field clean_umami must be a number');
+    return writeError(c, 400, 'VALIDATION_FAILED', `field clean_umami must be a number`);
+  }
+  if (body['clean_umami'] !== undefined && body['clean_umami'] !== null && body['clean_umami'] < 1) {
+    return writeError(c, 400, 'VALIDATION_FAILED', `field 'clean_umami' is less than min 1`);
+  }
+  if (body['clean_umami'] !== undefined && body['clean_umami'] !== null && body['clean_umami'] > 3) {
+    return writeError(c, 400, 'VALIDATION_FAILED', `field 'clean_umami' is greater than max 3`);
   }
 
   const now = new Date().toISOString();
@@ -1701,7 +1345,80 @@ app.post('/api/sake_records', async (c) => {
     }
     return writeError(c, 400, 'INVALID_INPUT', errMsg);
   }
-  return c.json({ data: sanitizeRecord(created, []) }, 201);
+
+  // 5. Sequentially create nested child records with compensating rollback on failure
+  const createdChildTrackers: { table: string; id: any }[] = [];
+  const embeddedChildrenMap: Record<string, any[]> = {};
+
+  for (const nw of nestedWrites) {
+    const createdForRel: any[] = [];
+    if (nw.relName === 'images') {
+      for (let idx = 0; idx < nw.items.length; idx++) {
+        const childPayload: any = { ...nw.items[idx] };
+        childPayload['record_id'] = created.id;
+        if (authUser) {
+          childPayload['owner_id'] = authUser.id;
+        } else {
+          delete childPayload['owner_id'];
+        }
+        const childInsertSql = `INSERT INTO "sake_images" ("legacy_id", "owner_id", "record_id", "image_key", "thumbnail_key", "mime_type", "file_name", "display_order", "created_at", "updated_at") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`;
+        try {
+          const childCreated = await c.env.DB.prepare(childInsertSql).bind(childPayload['legacy_id'] !== undefined ? childPayload['legacy_id'] : null, childPayload['owner_id'] !== undefined ? childPayload['owner_id'] : null, childPayload['record_id'] !== undefined ? childPayload['record_id'] : null, null, null, childPayload['mime_type'] !== undefined ? childPayload['mime_type'] : null, childPayload['file_name'] !== undefined ? childPayload['file_name'] : null, childPayload['display_order'] !== undefined ? childPayload['display_order'] : 0, now, now).first<any>();
+          createdChildTrackers.push({ table: 'sake_images', id: childCreated.id });
+          createdForRel.push(sanitizeRecord(childCreated, nw.targetPwdFields));
+        } catch (childErr: any) {
+          // Compensating rollback: delete created children in reverse order, then delete parent
+          for (let j = createdChildTrackers.length - 1; j >= 0; j--) {
+            try {
+              await c.env.DB.prepare(`DELETE FROM "${createdChildTrackers[j].table}" WHERE id = ?`).bind(createdChildTrackers[j].id).run();
+            } catch (_) {}
+          }
+          try {
+            await c.env.DB.prepare('DELETE FROM "sake_records" WHERE id = ?').bind(created.id).run();
+          } catch (_) {}
+          const childErrMsg = String(childErr?.message || childErr);
+          if (childErrMsg.includes('UNIQUE constraint failed') || childErrMsg.includes('SQLITE_CONSTRAINT')) {
+            return writeError(c, 400, 'INVALID_INPUT', `nested record #${idx+1} in 'images' unique constraint failed: ${childErrMsg}`);
+          }
+          return writeError(c, 400, 'INVALID_INPUT', `failed creating nested record #${idx+1} in 'images': ${childErrMsg}`);
+        }
+      }
+    }
+    if (nw.relName === 'record_tags') {
+      for (let idx = 0; idx < nw.items.length; idx++) {
+        const childPayload: any = { ...nw.items[idx] };
+        childPayload['sake_record_id'] = created.id;
+        const childInsertSql = `INSERT INTO "record_tags" ("sake_record_id", "tag_id", "created_at", "updated_at") VALUES (?, ?, ?, ?) RETURNING *`;
+        try {
+          const childCreated = await c.env.DB.prepare(childInsertSql).bind(childPayload['sake_record_id'] !== undefined ? childPayload['sake_record_id'] : null, childPayload['tag_id'] !== undefined ? childPayload['tag_id'] : null, now, now).first<any>();
+          createdChildTrackers.push({ table: 'record_tags', id: childCreated.id });
+          createdForRel.push(sanitizeRecord(childCreated, nw.targetPwdFields));
+        } catch (childErr: any) {
+          // Compensating rollback: delete created children in reverse order, then delete parent
+          for (let j = createdChildTrackers.length - 1; j >= 0; j--) {
+            try {
+              await c.env.DB.prepare(`DELETE FROM "${createdChildTrackers[j].table}" WHERE id = ?`).bind(createdChildTrackers[j].id).run();
+            } catch (_) {}
+          }
+          try {
+            await c.env.DB.prepare('DELETE FROM "sake_records" WHERE id = ?').bind(created.id).run();
+          } catch (_) {}
+          const childErrMsg = String(childErr?.message || childErr);
+          if (childErrMsg.includes('UNIQUE constraint failed') || childErrMsg.includes('SQLITE_CONSTRAINT')) {
+            return writeError(c, 400, 'INVALID_INPUT', `nested record #${idx+1} in 'record_tags' unique constraint failed: ${childErrMsg}`);
+          }
+          return writeError(c, 400, 'INVALID_INPUT', `failed creating nested record #${idx+1} in 'record_tags': ${childErrMsg}`);
+        }
+      }
+    }
+    embeddedChildrenMap[nw.relName] = createdForRel;
+  }
+
+  const responseData = sanitizeRecord(created, []);
+  for (const [relName, childrenList] of Object.entries(embeddedChildrenMap)) {
+    responseData[relName] = childrenList;
+  }
+  return c.json({ data: responseData }, 201);
 });
 
 // UPDATE /api/sake_records/:id
@@ -1732,6 +1449,105 @@ app.put('/api/sake_records/:id', async (c) => {
 
   if (body['role'] !== undefined && body['role'] !== (existing as any)['role'] && body['role'] === 'admin' && (!authUser || authUser.role !== 'admin')) {
     return writeError(c, 403, 'FORBIDDEN', 'cannot grant admin role');
+  }
+  if (body['legacy_id'] !== undefined && body['legacy_id'] !== null && typeof body['legacy_id'] !== 'string') {
+    return writeError(c, 400, 'VALIDATION_FAILED', `field legacy_id must be a string`);
+  }
+  if (body['owner_id'] !== undefined && body['owner_id'] !== null && typeof body['owner_id'] !== 'string') {
+    return writeError(c, 400, 'VALIDATION_FAILED', `field owner_id must be a string`);
+  }
+  if (body['drink_type'] !== undefined && body['drink_type'] !== null && typeof body['drink_type'] !== 'string') {
+    return writeError(c, 400, 'VALIDATION_FAILED', `field drink_type must be a string`);
+  }
+  if (body['name'] !== undefined && body['name'] !== null && typeof body['name'] !== 'string') {
+    return writeError(c, 400, 'VALIDATION_FAILED', `field name must be a string`);
+  }
+  if (body['name'] !== undefined && body['name'] !== null && body['name'].length < 1) {
+    return writeError(c, 400, 'VALIDATION_FAILED', `field 'name' length is less than min_length 1`);
+  }
+  if (body['region'] !== undefined && body['region'] !== null && typeof body['region'] !== 'string') {
+    return writeError(c, 400, 'VALIDATION_FAILED', `field region must be a string`);
+  }
+  if (body['brewery'] !== undefined && body['brewery'] !== null && typeof body['brewery'] !== 'string') {
+    return writeError(c, 400, 'VALIDATION_FAILED', `field brewery must be a string`);
+  }
+  if (body['rice'] !== undefined && body['rice'] !== null && typeof body['rice'] !== 'string') {
+    return writeError(c, 400, 'VALIDATION_FAILED', `field rice must be a string`);
+  }
+  if (body['sake_type'] !== undefined && body['sake_type'] !== null && typeof body['sake_type'] !== 'string') {
+    return writeError(c, 400, 'VALIDATION_FAILED', `field sake_type must be a string`);
+  }
+  if (body['sake_meter_value'] !== undefined && body['sake_meter_value'] !== null && typeof body['sake_meter_value'] !== 'string') {
+    return writeError(c, 400, 'VALIDATION_FAILED', `field sake_meter_value must be a string`);
+  }
+  if (body['abv'] !== undefined && body['abv'] !== null && typeof body['abv'] !== 'string') {
+    return writeError(c, 400, 'VALIDATION_FAILED', `field abv must be a string`);
+  }
+  if (body['volume'] !== undefined && body['volume'] !== null && typeof body['volume'] !== 'string') {
+    return writeError(c, 400, 'VALIDATION_FAILED', `field volume must be a string`);
+  }
+  if (body['price'] !== undefined && body['price'] !== null && typeof body['price'] !== 'string') {
+    return writeError(c, 400, 'VALIDATION_FAILED', `field price must be a string`);
+  }
+  if (body['one_line_note'] !== undefined && body['one_line_note'] !== null && typeof body['one_line_note'] !== 'string') {
+    return writeError(c, 400, 'VALIDATION_FAILED', `field one_line_note must be a string`);
+  }
+  if (body['place'] !== undefined && body['place'] !== null && typeof body['place'] !== 'string') {
+    return writeError(c, 400, 'VALIDATION_FAILED', `field place must be a string`);
+  }
+  if (body['consumed_date'] !== undefined && body['consumed_date'] !== null && (typeof body['consumed_date'] !== 'string' || isNaN(Date.parse(body['consumed_date'])))) {
+    return writeError(c, 400, 'VALIDATION_FAILED', `field consumed_date must be a valid datetime`);
+  }
+  if (body['companions'] !== undefined && body['companions'] !== null && typeof body['companions'] !== 'string') {
+    return writeError(c, 400, 'VALIDATION_FAILED', `field companions must be a string`);
+  }
+  if (body['food_pairing'] !== undefined && body['food_pairing'] !== null && typeof body['food_pairing'] !== 'string') {
+    return writeError(c, 400, 'VALIDATION_FAILED', `field food_pairing must be a string`);
+  }
+  if (body['drink_again'] !== undefined && body['drink_again'] !== null) {
+    if (typeof body['drink_again'] !== 'string') {
+      return writeError(c, 400, 'VALIDATION_FAILED', `field drink_again must be a string`);
+    }
+    const allowed_drink_again = ['no', 'unsure', 'yes'];
+    if (!allowed_drink_again.includes(body['drink_again'])) {
+      return writeError(c, 400, 'VALIDATION_FAILED', `field drink_again value '${body['drink_again']}' is not in allowed enum values ${JSON.stringify(['no', 'unsure', 'yes'])}`);
+    }
+  }
+  if (body['sweet_dry'] !== undefined && body['sweet_dry'] !== null && typeof body['sweet_dry'] !== 'number') {
+    return writeError(c, 400, 'VALIDATION_FAILED', `field sweet_dry must be a number`);
+  }
+  if (body['sweet_dry'] !== undefined && body['sweet_dry'] !== null && body['sweet_dry'] < 1) {
+    return writeError(c, 400, 'VALIDATION_FAILED', `field 'sweet_dry' is less than min 1`);
+  }
+  if (body['sweet_dry'] !== undefined && body['sweet_dry'] !== null && body['sweet_dry'] > 5) {
+    return writeError(c, 400, 'VALIDATION_FAILED', `field 'sweet_dry' is greater than max 5`);
+  }
+  if (body['aroma_intensity'] !== undefined && body['aroma_intensity'] !== null && typeof body['aroma_intensity'] !== 'number') {
+    return writeError(c, 400, 'VALIDATION_FAILED', `field aroma_intensity must be a number`);
+  }
+  if (body['aroma_intensity'] !== undefined && body['aroma_intensity'] !== null && body['aroma_intensity'] < 1) {
+    return writeError(c, 400, 'VALIDATION_FAILED', `field 'aroma_intensity' is less than min 1`);
+  }
+  if (body['aroma_intensity'] !== undefined && body['aroma_intensity'] !== null && body['aroma_intensity'] > 3) {
+    return writeError(c, 400, 'VALIDATION_FAILED', `field 'aroma_intensity' is greater than max 3`);
+  }
+  if (body['acidity'] !== undefined && body['acidity'] !== null && typeof body['acidity'] !== 'number') {
+    return writeError(c, 400, 'VALIDATION_FAILED', `field acidity must be a number`);
+  }
+  if (body['acidity'] !== undefined && body['acidity'] !== null && body['acidity'] < 1) {
+    return writeError(c, 400, 'VALIDATION_FAILED', `field 'acidity' is less than min 1`);
+  }
+  if (body['acidity'] !== undefined && body['acidity'] !== null && body['acidity'] > 3) {
+    return writeError(c, 400, 'VALIDATION_FAILED', `field 'acidity' is greater than max 3`);
+  }
+  if (body['clean_umami'] !== undefined && body['clean_umami'] !== null && typeof body['clean_umami'] !== 'number') {
+    return writeError(c, 400, 'VALIDATION_FAILED', `field clean_umami must be a number`);
+  }
+  if (body['clean_umami'] !== undefined && body['clean_umami'] !== null && body['clean_umami'] < 1) {
+    return writeError(c, 400, 'VALIDATION_FAILED', `field 'clean_umami' is less than min 1`);
+  }
+  if (body['clean_umami'] !== undefined && body['clean_umami'] !== null && body['clean_umami'] > 3) {
+    return writeError(c, 400, 'VALIDATION_FAILED', `field 'clean_umami' is greater than max 3`);
   }
   const now = new Date().toISOString();
   const updateSql = `UPDATE "sake_records" SET "legacy_id" = ?, "owner_id" = ?, "drink_type" = ?, "name" = ?, "region" = ?, "brewery" = ?, "rice" = ?, "sake_type" = ?, "sake_meter_value" = ?, "abv" = ?, "volume" = ?, "price" = ?, "one_line_note" = ?, "place" = ?, "consumed_date" = ?, "companions" = ?, "food_pairing" = ?, "drink_again" = ?, "sweet_dry" = ?, "aroma_intensity" = ?, "acidity" = ?, "clean_umami" = ?, "updated_at" = ? WHERE id = ? RETURNING *`;
@@ -1923,6 +1739,626 @@ app.get('/view/sake_records/:id', async (c) => {
   html += `<dt>aroma_intensity</dt><dd>${escapeHTML(record['aroma_intensity'])}</dd>`;
   html += `<dt>acidity</dt><dd>${escapeHTML(record['acidity'])}</dd>`;
   html += `<dt>clean_umami</dt><dd>${escapeHTML(record['clean_umami'])}</dd>`;
+  html += `</dl></body></html>`;
+  return c.html(html);
+});
+
+// LIST /api/tags
+app.get('/api/tags', async (c) => {
+  const authUser = await getAuthUser(c);
+  const limit = Math.min(parseInt(c.req.query('limit') || '20', 10), 100);
+  const offset = Math.max(parseInt(c.req.query('offset') || '0', 10), 0);
+
+  const whereConds: string[] = [];
+  const params: any[] = [];
+  if (!authUser || authUser.role !== 'admin') {
+    if (authUser) {
+      whereConds.push('("owner_id" = ? OR "owner_id" IS NULL)');
+      params.push(authUser.id);
+    } else {
+      whereConds.push('"owner_id" IS NULL');
+    }
+  }
+  const whereClause = whereConds.length > 0 ? ' WHERE ' + whereConds.join(' AND ') : '';
+  const countSql = `SELECT COUNT(*) as total FROM "tags"${whereClause}`;
+  const countStmt = await c.env.DB.prepare(countSql).bind(...params).first<{ total: number }>();
+  const total = countStmt ? countStmt.total : 0;
+  const querySql = `SELECT * FROM "tags"${whereClause} ORDER BY id ASC LIMIT ? OFFSET ?`;
+  const { results } = await c.env.DB.prepare(querySql).bind(...params, limit, offset).all();
+  const sanitized = (results || []).map((r: any) => sanitizeRecord(r, []));
+  const incErr = await processIncludes(c, 'tags', sanitized, c.req.query('include'), authUser);
+  if (incErr) return incErr;
+  return c.json({
+    data: sanitized,
+    meta: { total, limit, offset }
+  });
+});
+
+// DETAIL /api/tags/:id
+app.get('/api/tags/:id', async (c) => {
+  const authUser = await getAuthUser(c);
+  const id = c.req.param('id');
+  const record = await c.env.DB.prepare('SELECT * FROM "tags" WHERE id = ?').bind(id).first();
+  if (!record) {
+    return writeError(c, 404, 'NOT_FOUND', 'record not found');
+  }
+  const ownerVal = (record as any)['owner_id'];
+  if (ownerVal !== null && ownerVal !== undefined) {
+    if (!authUser) {
+      return writeError(c, 401, 'UNAUTHORIZED', 'authentication required');
+    }
+    if (authUser.role !== 'admin' && ownerVal != authUser.id) {
+      return writeError(c, 403, 'FORBIDDEN', 'forbidden');
+    }
+  }
+  const sanitized = sanitizeRecord(record, []);
+  const incErr = await processIncludes(c, 'tags', [sanitized], c.req.query('include'), authUser);
+  if (incErr) return incErr;
+  return c.json({ data: sanitized });
+});
+
+// CREATE /api/tags
+app.post('/api/tags', async (c) => {
+  const authUser = await getAuthUser(c);
+  if (!authUser) {
+    return writeError(c, 401, 'UNAUTHORIZED', 'authentication required');
+  }
+  let body: any = {};
+  let formData: FormData | null = null;
+  const rawHeader = c.req.header('content-type') || c.req.header('Content-Type') || (c.req.raw && c.req.raw.headers ? c.req.raw.headers.get('content-type') : '') || '';
+  const contentType = String(rawHeader).toLowerCase();
+  if (contentType.includes('multipart/form-data')) {
+    try {
+      formData = await c.req.formData();
+      formData.forEach((val, key) => {
+        if (typeof val === 'string') { body[key] = (val !== '' && !isNaN(Number(val))) ? Number(val) : val; }
+      });
+    } catch (e) {
+      return writeError(c, 400, 'INVALID_MULTIPART', 'failed to parse multipart body');
+    }
+  } else {
+    try {
+      body = await c.req.json();
+    } catch (e) {
+      return writeError(c, 400, 'INVALID_JSON', 'failed to parse json body');
+    }
+  }
+
+  if (body['role'] === 'admin' && (!authUser || authUser.role !== 'admin')) {
+    return writeError(c, 403, 'FORBIDDEN', 'cannot grant admin role');
+  }
+  if (authUser) {
+    body['owner_id'] = authUser.id;
+  } else {
+    delete body['owner_id'];
+  }
+  if (body['legacy_id'] !== undefined && body['legacy_id'] !== null && typeof body['legacy_id'] !== 'string') {
+    return writeError(c, 400, 'VALIDATION_FAILED', `field legacy_id must be a string`);
+  }
+  if (body['owner_id'] !== undefined && body['owner_id'] !== null && typeof body['owner_id'] !== 'string') {
+    return writeError(c, 400, 'VALIDATION_FAILED', `field owner_id must be a string`);
+  }
+  if (body['drink_type'] !== undefined && body['drink_type'] !== null && typeof body['drink_type'] !== 'string') {
+    return writeError(c, 400, 'VALIDATION_FAILED', `field drink_type must be a string`);
+  }
+  if (body['tag_group'] === undefined || body['tag_group'] === null) {
+    return writeError(c, 400, 'VALIDATION_FAILED', `field tag_group is required`);
+  }
+  if (body['tag_group'] !== undefined && body['tag_group'] !== null) {
+    if (typeof body['tag_group'] !== 'string') {
+      return writeError(c, 400, 'VALIDATION_FAILED', `field tag_group must be a string`);
+    }
+    const allowed_tag_group = ['taste', 'aroma', 'mood'];
+    if (!allowed_tag_group.includes(body['tag_group'])) {
+      return writeError(c, 400, 'VALIDATION_FAILED', `field tag_group value '${body['tag_group']}' is not in allowed enum values ${JSON.stringify(['taste', 'aroma', 'mood'])}`);
+    }
+  }
+  if (body['label'] === undefined || body['label'] === null) {
+    return writeError(c, 400, 'VALIDATION_FAILED', `field label is required`);
+  }
+  if (body['label'] !== undefined && body['label'] !== null && typeof body['label'] !== 'string') {
+    return writeError(c, 400, 'VALIDATION_FAILED', `field label must be a string`);
+  }
+  if (body['label'] !== undefined && body['label'] !== null && body['label'].length < 1) {
+    return writeError(c, 400, 'VALIDATION_FAILED', `field 'label' length is less than min_length 1`);
+  }
+  if (body['is_default'] !== undefined && body['is_default'] !== null && typeof body['is_default'] !== 'boolean') {
+    return writeError(c, 400, 'VALIDATION_FAILED', `field is_default must be a boolean`);
+  }
+
+  const now = new Date().toISOString();
+  const insertSql = `INSERT INTO "tags" ("legacy_id", "owner_id", "drink_type", "tag_group", "label", "is_default", "created_at", "updated_at") VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`;
+  let created: any = null;
+  try {
+    created = await c.env.DB.prepare(insertSql).bind(body['legacy_id'] !== undefined ? body['legacy_id'] : null, body['owner_id'] !== undefined ? body['owner_id'] : null, body['drink_type'] !== undefined ? body['drink_type'] : 'sake', body['tag_group'] !== undefined ? body['tag_group'] : null, body['label'] !== undefined ? body['label'] : null, body['is_default'] !== undefined ? (body['is_default'] ? 1 : 0) : false, now, now).first<any>();
+  } catch (err: any) {
+    const errMsg = String(err?.message || err);
+    if (errMsg.includes('UNIQUE constraint failed') || errMsg.includes('SQLITE_CONSTRAINT')) {
+      return writeError(c, 400, 'INVALID_INPUT', `unique constraint failed: ${errMsg}`);
+    }
+    return writeError(c, 400, 'INVALID_INPUT', errMsg);
+  }
+  return c.json({ data: sanitizeRecord(created, []) }, 201);
+});
+
+// UPDATE /api/tags/:id
+app.put('/api/tags/:id', async (c) => {
+  const authUser = await getAuthUser(c);
+  if (!authUser) {
+    return writeError(c, 401, 'UNAUTHORIZED', 'authentication required');
+  }
+  const id = c.req.param('id');
+  const existing = await c.env.DB.prepare('SELECT * FROM "tags" WHERE id = ?').bind(id).first();
+  if (!existing) {
+    return writeError(c, 404, 'NOT_FOUND', 'record not found');
+  }
+  const ownerVal = (existing as any)['owner_id'];
+  if (ownerVal === null || ownerVal === undefined) {
+    if (authUser.role !== 'admin') {
+      return writeError(c, 403, 'FORBIDDEN', 'forbidden');
+    }
+  } else if (authUser.role !== 'admin' && ownerVal != authUser.id) {
+    return writeError(c, 403, 'FORBIDDEN', 'forbidden');
+  }
+  let body: any;
+  try {
+    body = await c.req.json();
+  } catch (e) {
+    return writeError(c, 400, 'INVALID_JSON', 'failed to parse json body');
+  }
+
+  if (body['role'] !== undefined && body['role'] !== (existing as any)['role'] && body['role'] === 'admin' && (!authUser || authUser.role !== 'admin')) {
+    return writeError(c, 403, 'FORBIDDEN', 'cannot grant admin role');
+  }
+  if (body['legacy_id'] !== undefined && body['legacy_id'] !== null && typeof body['legacy_id'] !== 'string') {
+    return writeError(c, 400, 'VALIDATION_FAILED', `field legacy_id must be a string`);
+  }
+  if (body['owner_id'] !== undefined && body['owner_id'] !== null && typeof body['owner_id'] !== 'string') {
+    return writeError(c, 400, 'VALIDATION_FAILED', `field owner_id must be a string`);
+  }
+  if (body['drink_type'] !== undefined && body['drink_type'] !== null && typeof body['drink_type'] !== 'string') {
+    return writeError(c, 400, 'VALIDATION_FAILED', `field drink_type must be a string`);
+  }
+  if (body['tag_group'] !== undefined && body['tag_group'] !== null) {
+    if (typeof body['tag_group'] !== 'string') {
+      return writeError(c, 400, 'VALIDATION_FAILED', `field tag_group must be a string`);
+    }
+    const allowed_tag_group = ['taste', 'aroma', 'mood'];
+    if (!allowed_tag_group.includes(body['tag_group'])) {
+      return writeError(c, 400, 'VALIDATION_FAILED', `field tag_group value '${body['tag_group']}' is not in allowed enum values ${JSON.stringify(['taste', 'aroma', 'mood'])}`);
+    }
+  }
+  if (body['label'] !== undefined && body['label'] !== null && typeof body['label'] !== 'string') {
+    return writeError(c, 400, 'VALIDATION_FAILED', `field label must be a string`);
+  }
+  if (body['label'] !== undefined && body['label'] !== null && body['label'].length < 1) {
+    return writeError(c, 400, 'VALIDATION_FAILED', `field 'label' length is less than min_length 1`);
+  }
+  if (body['is_default'] !== undefined && body['is_default'] !== null && typeof body['is_default'] !== 'boolean') {
+    return writeError(c, 400, 'VALIDATION_FAILED', `field is_default must be a boolean`);
+  }
+  const now = new Date().toISOString();
+  const updateSql = `UPDATE "tags" SET "legacy_id" = ?, "owner_id" = ?, "drink_type" = ?, "tag_group" = ?, "label" = ?, "is_default" = ?, "updated_at" = ? WHERE id = ? RETURNING *`;
+  let updated: any = null;
+  try {
+    updated = await c.env.DB.prepare(updateSql).bind(body['legacy_id'] !== undefined ? body['legacy_id'] : (existing as any)['legacy_id'], body['owner_id'] !== undefined ? body['owner_id'] : (existing as any)['owner_id'], body['drink_type'] !== undefined ? body['drink_type'] : (existing as any)['drink_type'], body['tag_group'] !== undefined ? body['tag_group'] : (existing as any)['tag_group'], body['label'] !== undefined ? body['label'] : (existing as any)['label'], body['is_default'] !== undefined ? body['is_default'] : (existing as any)['is_default'], now, id).first();
+  } catch (err: any) {
+    const errMsg = String(err?.message || err);
+    if (errMsg.includes('UNIQUE constraint failed') || errMsg.includes('SQLITE_CONSTRAINT')) {
+      return writeError(c, 400, 'INVALID_INPUT', `unique constraint failed: ${errMsg}`);
+    }
+    return writeError(c, 400, 'INVALID_INPUT', errMsg);
+  }
+  if (!updated) {
+    return writeError(c, 404, 'NOT_FOUND', 'record not found');
+  }
+  return c.json({ data: sanitizeRecord(updated, []) });
+});
+
+// DELETE /api/tags/:id
+app.delete('/api/tags/:id', async (c) => {
+  const authUser = await getAuthUser(c);
+  if (!authUser) {
+    return writeError(c, 401, 'UNAUTHORIZED', 'authentication required');
+  }
+  const id = c.req.param('id');
+  const parsedId = isNaN(Number(id)) ? id : Number(id);
+  const existing = await c.env.DB.prepare('SELECT * FROM "tags" WHERE id = ?').bind(id).first();
+  if (!existing) {
+    return writeError(c, 404, 'NOT_FOUND', 'record not found');
+  }
+  const ownerVal = (existing as any)['owner_id'];
+  if (ownerVal === null || ownerVal === undefined) {
+    if (authUser.role !== 'admin') {
+      return writeError(c, 403, 'FORBIDDEN', 'forbidden');
+    }
+  } else if (authUser.role !== 'admin' && ownerVal != authUser.id) {
+    return writeError(c, 403, 'FORBIDDEN', 'forbidden');
+  }
+  const res = await c.env.DB.prepare('DELETE FROM "tags" WHERE id = ?').bind(id).run();
+  if (!res.meta.changes) {
+    return writeError(c, 404, 'NOT_FOUND', 'record not found');
+  }
+  return c.json({ data: { deleted: true, id: parsedId } });
+});
+
+// VIEW LIST /view/tags
+app.get('/view/tags', async (c) => {
+  const authUser = await getAuthUser(c);
+  const whereConds: string[] = [];
+  const params: any[] = [];
+  if (!authUser || authUser.role !== 'admin') {
+    if (authUser) {
+      whereConds.push('("owner_id" = ? OR "owner_id" IS NULL)');
+      params.push(authUser.id);
+    } else {
+      whereConds.push('"owner_id" IS NULL');
+    }
+  }
+  const whereClause = whereConds.length > 0 ? ' WHERE ' + whereConds.join(' AND ') : '';
+  const { results } = await c.env.DB.prepare(`SELECT * FROM "tags"${whereClause} ORDER BY id ASC`).bind(...params).all();
+  const viewRecs = (results || []) as any[];
+  const incErr = await processIncludes(c, 'tags', viewRecs, c.req.query('include'), authUser);
+  if (incErr) return incErr;
+  let html = `<!DOCTYPE html><html><head><title>Tag List</title></head><body>`;
+  html += `<h1>Tag List</h1>`;
+  html += `<a href="/view/tags/new">+ New Tag</a><br/><br/><table border="1"><thead><tr><th>id</th>`;
+  html += `<th>legacy_id</th>`;
+  html += `<th>owner_id</th>`;
+  html += `<th>drink_type</th>`;
+  html += `<th>tag_group</th>`;
+  html += `<th>label</th>`;
+  html += `<th>is_default</th>`;
+  html += `<th>Actions</th></tr></thead><tbody>`;
+  for (const row of viewRecs) {
+    html += `<tr><td>${(row as any).id}</td>`;
+    html += `<td>${escapeHTML((row as any)['legacy_id'])}</td>`;
+    html += `<td>${escapeHTML((row as any)['owner_id'])}</td>`;
+    html += `<td>${escapeHTML((row as any)['drink_type'])}</td>`;
+    html += `<td>${escapeHTML((row as any)['tag_group'])}</td>`;
+    html += `<td>${escapeHTML((row as any)['label'])}</td>`;
+    html += `<td>${escapeHTML((row as any)['is_default'])}</td>`;
+    html += `<td><a href="/view/tags/${(row as any).id}">Detail</a> <a href="/view/tags/${(row as any).id}/edit">Edit</a></td></tr>`;
+  }
+  html += `</tbody></table></body></html>`;
+  return c.html(html);
+});
+
+// VIEW NEW /view/tags/new
+app.get('/view/tags/new', async (c) => {
+  let html = `<!DOCTYPE html><html><head><title>New Tag</title></head><body><h1>New Tag</h1><form method="POST" action="/view/tags">`;
+  html += `<label>legacy_id: <input type="text" name="legacy_id" /></label><br/><br/>`;
+  html += `<label>owner_id: <input type="text" name="owner_id" /></label><br/><br/>`;
+  html += `<label>drink_type: <input type="text" name="drink_type" /></label><br/><br/>`;
+  html += `<label>tag_group: <input type="text" name="tag_group" /></label><br/><br/>`;
+  html += `<label>label: <input type="text" name="label" /></label><br/><br/>`;
+  html += `<label>is_default: <input type="text" name="is_default" /></label><br/><br/>`;
+  html += `<button type="submit">Save</button></form></body></html>`;
+  return c.html(html);
+});
+
+// VIEW CREATE SUBMIT /view/tags
+app.post('/view/tags', async (c) => {
+  const formData = await c.req.formData();
+  const body: any = {};
+  formData.forEach((value, key) => { body[key] = value; });
+  const now = new Date().toISOString();
+  const insertSql = `INSERT INTO "tags" ("legacy_id", "owner_id", "drink_type", "tag_group", "label", "is_default", "created_at", "updated_at") VALUES (?, ?, ?, ?, ?, ?, ?, ?)`;
+  await c.env.DB.prepare(insertSql).bind(body['legacy_id'] !== undefined ? body['legacy_id'] : null, body['owner_id'] !== undefined ? body['owner_id'] : null, body['drink_type'] !== undefined ? body['drink_type'] : 'sake', body['tag_group'] !== undefined ? body['tag_group'] : null, body['label'] !== undefined ? body['label'] : null, body['is_default'] !== undefined ? (body['is_default'] ? 1 : 0) : false, now, now).run();
+  return c.redirect('/view/tags', 303);
+});
+
+// VIEW DETAIL /view/tags/:id
+app.get('/view/tags/:id', async (c) => {
+  const id = c.req.param('id');
+  const record = await c.env.DB.prepare('SELECT * FROM "tags" WHERE id = ?').bind(id).first<any>();
+  if (!record) return c.html('<h1>404 Not Found</h1>', 404);
+  const authUser = await getAuthUser(c);
+  const incErr = await processIncludes(c, 'tags', [record], c.req.query('include'), authUser);
+  if (incErr) return incErr;
+  let html = `<!DOCTYPE html><html><head><title>Tag Detail</title></head><body><h1>Tag #${id}</h1><dl>`;
+  html += `<dt>legacy_id</dt><dd>${escapeHTML(record['legacy_id'])}</dd>`;
+  html += `<dt>owner_id</dt><dd>${escapeHTML(record['owner_id'])}</dd>`;
+  html += `<dt>drink_type</dt><dd>${escapeHTML(record['drink_type'])}</dd>`;
+  html += `<dt>tag_group</dt><dd>${escapeHTML(record['tag_group'])}</dd>`;
+  html += `<dt>label</dt><dd>${escapeHTML(record['label'])}</dd>`;
+  html += `<dt>is_default</dt><dd>${escapeHTML(record['is_default'])}</dd>`;
+  html += `</dl></body></html>`;
+  return c.html(html);
+});
+
+// LIST /api/users
+app.get('/api/users', async (c) => {
+  const authUser = await getAuthUser(c);
+  if (!authUser) {
+    return writeError(c, 401, 'UNAUTHORIZED', 'authentication required');
+  }
+  const limit = Math.min(parseInt(c.req.query('limit') || '20', 10), 100);
+  const offset = Math.max(parseInt(c.req.query('offset') || '0', 10), 0);
+
+  const whereConds: string[] = [];
+  const params: any[] = [];
+  const whereClause = whereConds.length > 0 ? ' WHERE ' + whereConds.join(' AND ') : '';
+  const countSql = `SELECT COUNT(*) as total FROM "users"${whereClause}`;
+  const countStmt = await c.env.DB.prepare(countSql).bind(...params).first<{ total: number }>();
+  const total = countStmt ? countStmt.total : 0;
+  const querySql = `SELECT * FROM "users"${whereClause} ORDER BY id ASC LIMIT ? OFFSET ?`;
+  const { results } = await c.env.DB.prepare(querySql).bind(...params, limit, offset).all();
+  const sanitized = (results || []).map((r: any) => sanitizeRecord(r, []));
+  const incErr = await processIncludes(c, 'users', sanitized, c.req.query('include'), authUser);
+  if (incErr) return incErr;
+  return c.json({
+    data: sanitized,
+    meta: { total, limit, offset }
+  });
+});
+
+// DETAIL /api/users/:id
+app.get('/api/users/:id', async (c) => {
+  const authUser = await getAuthUser(c);
+  if (!authUser) {
+    return writeError(c, 401, 'UNAUTHORIZED', 'authentication required');
+  }
+  const id = c.req.param('id');
+  const record = await c.env.DB.prepare('SELECT * FROM "users" WHERE id = ?').bind(id).first();
+  if (!record) {
+    return writeError(c, 404, 'NOT_FOUND', 'record not found');
+  }
+  const sanitized = sanitizeRecord(record, []);
+  const incErr = await processIncludes(c, 'users', [sanitized], c.req.query('include'), authUser);
+  if (incErr) return incErr;
+  return c.json({ data: sanitized });
+});
+
+// CREATE /api/users
+app.post('/api/users', async (c) => {
+  const authUser = await getAuthUser(c);
+  let body: any = {};
+  let formData: FormData | null = null;
+  const rawHeader = c.req.header('content-type') || c.req.header('Content-Type') || (c.req.raw && c.req.raw.headers ? c.req.raw.headers.get('content-type') : '') || '';
+  const contentType = String(rawHeader).toLowerCase();
+  if (contentType.includes('multipart/form-data')) {
+    try {
+      formData = await c.req.formData();
+      formData.forEach((val, key) => {
+        if (typeof val === 'string') { body[key] = (val !== '' && !isNaN(Number(val))) ? Number(val) : val; }
+      });
+    } catch (e) {
+      return writeError(c, 400, 'INVALID_MULTIPART', 'failed to parse multipart body');
+    }
+  } else {
+    try {
+      body = await c.req.json();
+    } catch (e) {
+      return writeError(c, 400, 'INVALID_JSON', 'failed to parse json body');
+    }
+  }
+
+  if (body['role'] === 'admin' && (!authUser || authUser.role !== 'admin')) {
+    return writeError(c, 403, 'FORBIDDEN', 'cannot grant admin role');
+  }
+  if (body['provider'] === undefined || body['provider'] === null) {
+    return writeError(c, 400, 'VALIDATION_FAILED', `field provider is required`);
+  }
+  if (body['provider'] !== undefined && body['provider'] !== null && typeof body['provider'] !== 'string') {
+    return writeError(c, 400, 'VALIDATION_FAILED', `field provider must be a string`);
+  }
+  if (body['provider_user_id'] === undefined || body['provider_user_id'] === null) {
+    return writeError(c, 400, 'VALIDATION_FAILED', `field provider_user_id is required`);
+  }
+  if (body['provider_user_id'] !== undefined && body['provider_user_id'] !== null && typeof body['provider_user_id'] !== 'string') {
+    return writeError(c, 400, 'VALIDATION_FAILED', `field provider_user_id must be a string`);
+  }
+  if (body['email'] !== undefined && body['email'] !== null && typeof body['email'] !== 'string') {
+    return writeError(c, 400, 'VALIDATION_FAILED', `field email must be a string`);
+  }
+  if (body['display_name'] !== undefined && body['display_name'] !== null && typeof body['display_name'] !== 'string') {
+    return writeError(c, 400, 'VALIDATION_FAILED', `field display_name must be a string`);
+  }
+  if (body['avatar_url'] !== undefined && body['avatar_url'] !== null && typeof body['avatar_url'] !== 'string') {
+    return writeError(c, 400, 'VALIDATION_FAILED', `field avatar_url must be a string`);
+  }
+  if (body['last_login_at'] !== undefined && body['last_login_at'] !== null && (typeof body['last_login_at'] !== 'string' || isNaN(Date.parse(body['last_login_at'])))) {
+    return writeError(c, 400, 'VALIDATION_FAILED', `field last_login_at must be a valid datetime`);
+  }
+  if (body['role'] !== undefined && body['role'] !== null) {
+    if (typeof body['role'] !== 'string') {
+      return writeError(c, 400, 'VALIDATION_FAILED', `field role must be a string`);
+    }
+    const allowed_role = ['admin', 'user'];
+    if (!allowed_role.includes(body['role'])) {
+      return writeError(c, 400, 'VALIDATION_FAILED', `field role value '${body['role']}' is not in allowed enum values ${JSON.stringify(['admin', 'user'])}`);
+    }
+  }
+
+  const now = new Date().toISOString();
+  const insertSql = `INSERT INTO "users" ("provider", "provider_user_id", "email", "display_name", "avatar_url", "last_login_at", "role", "created_at", "updated_at") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`;
+  let created: any = null;
+  try {
+    created = await c.env.DB.prepare(insertSql).bind(body['provider'] !== undefined ? body['provider'] : null, body['provider_user_id'] !== undefined ? body['provider_user_id'] : null, body['email'] !== undefined ? body['email'] : null, body['display_name'] !== undefined ? body['display_name'] : null, body['avatar_url'] !== undefined ? body['avatar_url'] : null, body['last_login_at'] !== undefined ? body['last_login_at'] : null, body['role'] !== undefined ? body['role'] : 'user', now, now).first<any>();
+  } catch (err: any) {
+    const errMsg = String(err?.message || err);
+    if (errMsg.includes('UNIQUE constraint failed') || errMsg.includes('SQLITE_CONSTRAINT')) {
+      return writeError(c, 400, 'INVALID_INPUT', `unique constraint failed: ${errMsg}`);
+    }
+    return writeError(c, 400, 'INVALID_INPUT', errMsg);
+  }
+  return c.json({ data: sanitizeRecord(created, []) }, 201);
+});
+
+// UPDATE /api/users/:id
+app.put('/api/users/:id', async (c) => {
+  const authUser = await getAuthUser(c);
+  if (!authUser) {
+    return writeError(c, 401, 'UNAUTHORIZED', 'authentication required');
+  }
+  const id = c.req.param('id');
+  const existing = await c.env.DB.prepare('SELECT * FROM "users" WHERE id = ?').bind(id).first();
+  if (!existing) {
+    return writeError(c, 404, 'NOT_FOUND', 'record not found');
+  }
+  const ownerVal = (existing as any)['id'];
+  if (ownerVal === null || ownerVal === undefined) {
+    if (authUser.role !== 'admin') {
+      return writeError(c, 403, 'FORBIDDEN', 'forbidden');
+    }
+  } else if (authUser.role !== 'admin' && ownerVal != authUser.id) {
+    return writeError(c, 403, 'FORBIDDEN', 'forbidden');
+  }
+  let body: any;
+  try {
+    body = await c.req.json();
+  } catch (e) {
+    return writeError(c, 400, 'INVALID_JSON', 'failed to parse json body');
+  }
+
+  if (body['role'] !== undefined && body['role'] !== (existing as any)['role'] && body['role'] === 'admin' && (!authUser || authUser.role !== 'admin')) {
+    return writeError(c, 403, 'FORBIDDEN', 'cannot grant admin role');
+  }
+  if (body['provider'] !== undefined && body['provider'] !== null && typeof body['provider'] !== 'string') {
+    return writeError(c, 400, 'VALIDATION_FAILED', `field provider must be a string`);
+  }
+  if (body['provider_user_id'] !== undefined && body['provider_user_id'] !== null && typeof body['provider_user_id'] !== 'string') {
+    return writeError(c, 400, 'VALIDATION_FAILED', `field provider_user_id must be a string`);
+  }
+  if (body['email'] !== undefined && body['email'] !== null && typeof body['email'] !== 'string') {
+    return writeError(c, 400, 'VALIDATION_FAILED', `field email must be a string`);
+  }
+  if (body['display_name'] !== undefined && body['display_name'] !== null && typeof body['display_name'] !== 'string') {
+    return writeError(c, 400, 'VALIDATION_FAILED', `field display_name must be a string`);
+  }
+  if (body['avatar_url'] !== undefined && body['avatar_url'] !== null && typeof body['avatar_url'] !== 'string') {
+    return writeError(c, 400, 'VALIDATION_FAILED', `field avatar_url must be a string`);
+  }
+  if (body['last_login_at'] !== undefined && body['last_login_at'] !== null && (typeof body['last_login_at'] !== 'string' || isNaN(Date.parse(body['last_login_at'])))) {
+    return writeError(c, 400, 'VALIDATION_FAILED', `field last_login_at must be a valid datetime`);
+  }
+  if (body['role'] !== undefined && body['role'] !== null) {
+    if (typeof body['role'] !== 'string') {
+      return writeError(c, 400, 'VALIDATION_FAILED', `field role must be a string`);
+    }
+    const allowed_role = ['admin', 'user'];
+    if (!allowed_role.includes(body['role'])) {
+      return writeError(c, 400, 'VALIDATION_FAILED', `field role value '${body['role']}' is not in allowed enum values ${JSON.stringify(['admin', 'user'])}`);
+    }
+  }
+  const now = new Date().toISOString();
+  const updateSql = `UPDATE "users" SET "provider" = ?, "provider_user_id" = ?, "email" = ?, "display_name" = ?, "avatar_url" = ?, "last_login_at" = ?, "role" = ?, "updated_at" = ? WHERE id = ? RETURNING *`;
+  let updated: any = null;
+  try {
+    updated = await c.env.DB.prepare(updateSql).bind(body['provider'] !== undefined ? body['provider'] : (existing as any)['provider'], body['provider_user_id'] !== undefined ? body['provider_user_id'] : (existing as any)['provider_user_id'], body['email'] !== undefined ? body['email'] : (existing as any)['email'], body['display_name'] !== undefined ? body['display_name'] : (existing as any)['display_name'], body['avatar_url'] !== undefined ? body['avatar_url'] : (existing as any)['avatar_url'], body['last_login_at'] !== undefined ? body['last_login_at'] : (existing as any)['last_login_at'], body['role'] !== undefined ? body['role'] : (existing as any)['role'], now, id).first();
+  } catch (err: any) {
+    const errMsg = String(err?.message || err);
+    if (errMsg.includes('UNIQUE constraint failed') || errMsg.includes('SQLITE_CONSTRAINT')) {
+      return writeError(c, 400, 'INVALID_INPUT', `unique constraint failed: ${errMsg}`);
+    }
+    return writeError(c, 400, 'INVALID_INPUT', errMsg);
+  }
+  if (!updated) {
+    return writeError(c, 404, 'NOT_FOUND', 'record not found');
+  }
+  return c.json({ data: sanitizeRecord(updated, []) });
+});
+
+// DELETE /api/users/:id
+app.delete('/api/users/:id', async (c) => {
+  const authUser = await getAuthUser(c);
+  if (!authUser) {
+    return writeError(c, 401, 'UNAUTHORIZED', 'authentication required');
+  }
+  const id = c.req.param('id');
+  const parsedId = isNaN(Number(id)) ? id : Number(id);
+  const existing = await c.env.DB.prepare('SELECT * FROM "users" WHERE id = ?').bind(id).first();
+  if (!existing) {
+    return writeError(c, 404, 'NOT_FOUND', 'record not found');
+  }
+  if (!authUser || authUser.role !== 'admin') {
+    return writeError(c, 403, 'FORBIDDEN', 'forbidden');
+  }
+  const res = await c.env.DB.prepare('DELETE FROM "users" WHERE id = ?').bind(id).run();
+  if (!res.meta.changes) {
+    return writeError(c, 404, 'NOT_FOUND', 'record not found');
+  }
+  return c.json({ data: { deleted: true, id: parsedId } });
+});
+
+// VIEW LIST /view/users
+app.get('/view/users', async (c) => {
+  const authUser = await getAuthUser(c);
+  const whereConds: string[] = [];
+  const params: any[] = [];
+  const whereClause = whereConds.length > 0 ? ' WHERE ' + whereConds.join(' AND ') : '';
+  const { results } = await c.env.DB.prepare(`SELECT * FROM "users"${whereClause} ORDER BY id ASC`).bind(...params).all();
+  const viewRecs = (results || []) as any[];
+  const incErr = await processIncludes(c, 'users', viewRecs, c.req.query('include'), authUser);
+  if (incErr) return incErr;
+  let html = `<!DOCTYPE html><html><head><title>User List</title></head><body>`;
+  html += `<h1>User List</h1>`;
+  html += `<a href="/view/users/new">+ New User</a><br/><br/><table border="1"><thead><tr><th>id</th>`;
+  html += `<th>provider</th>`;
+  html += `<th>provider_user_id</th>`;
+  html += `<th>email</th>`;
+  html += `<th>display_name</th>`;
+  html += `<th>avatar_url</th>`;
+  html += `<th>last_login_at</th>`;
+  html += `<th>role</th>`;
+  html += `<th>Actions</th></tr></thead><tbody>`;
+  for (const row of viewRecs) {
+    html += `<tr><td>${(row as any).id}</td>`;
+    html += `<td>${escapeHTML((row as any)['provider'])}</td>`;
+    html += `<td>${escapeHTML((row as any)['provider_user_id'])}</td>`;
+    html += `<td>${escapeHTML((row as any)['email'])}</td>`;
+    html += `<td>${escapeHTML((row as any)['display_name'])}</td>`;
+    html += `<td>${escapeHTML((row as any)['avatar_url'])}</td>`;
+    html += `<td>${escapeHTML((row as any)['last_login_at'])}</td>`;
+    html += `<td>${escapeHTML((row as any)['role'])}</td>`;
+    html += `<td><a href="/view/users/${(row as any).id}">Detail</a> <a href="/view/users/${(row as any).id}/edit">Edit</a></td></tr>`;
+  }
+  html += `</tbody></table></body></html>`;
+  return c.html(html);
+});
+
+// VIEW NEW /view/users/new
+app.get('/view/users/new', async (c) => {
+  let html = `<!DOCTYPE html><html><head><title>New User</title></head><body><h1>New User</h1><form method="POST" action="/view/users">`;
+  html += `<label>provider: <input type="text" name="provider" /></label><br/><br/>`;
+  html += `<label>provider_user_id: <input type="text" name="provider_user_id" /></label><br/><br/>`;
+  html += `<label>email: <input type="text" name="email" /></label><br/><br/>`;
+  html += `<label>display_name: <input type="text" name="display_name" /></label><br/><br/>`;
+  html += `<label>avatar_url: <input type="text" name="avatar_url" /></label><br/><br/>`;
+  html += `<label>last_login_at: <input type="text" name="last_login_at" /></label><br/><br/>`;
+  html += `<label>role: <input type="text" name="role" /></label><br/><br/>`;
+  html += `<button type="submit">Save</button></form></body></html>`;
+  return c.html(html);
+});
+
+// VIEW CREATE SUBMIT /view/users
+app.post('/view/users', async (c) => {
+  const formData = await c.req.formData();
+  const body: any = {};
+  formData.forEach((value, key) => { body[key] = value; });
+  const now = new Date().toISOString();
+  const insertSql = `INSERT INTO "users" ("provider", "provider_user_id", "email", "display_name", "avatar_url", "last_login_at", "role", "created_at", "updated_at") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+  await c.env.DB.prepare(insertSql).bind(body['provider'] !== undefined ? body['provider'] : null, body['provider_user_id'] !== undefined ? body['provider_user_id'] : null, body['email'] !== undefined ? body['email'] : null, body['display_name'] !== undefined ? body['display_name'] : null, body['avatar_url'] !== undefined ? body['avatar_url'] : null, body['last_login_at'] !== undefined ? body['last_login_at'] : null, body['role'] !== undefined ? body['role'] : 'user', now, now).run();
+  return c.redirect('/view/users', 303);
+});
+
+// VIEW DETAIL /view/users/:id
+app.get('/view/users/:id', async (c) => {
+  const id = c.req.param('id');
+  const record = await c.env.DB.prepare('SELECT * FROM "users" WHERE id = ?').bind(id).first<any>();
+  if (!record) return c.html('<h1>404 Not Found</h1>', 404);
+  const authUser = await getAuthUser(c);
+  const incErr = await processIncludes(c, 'users', [record], c.req.query('include'), authUser);
+  if (incErr) return incErr;
+  let html = `<!DOCTYPE html><html><head><title>User Detail</title></head><body><h1>User #${id}</h1><dl>`;
+  html += `<dt>provider</dt><dd>${escapeHTML(record['provider'])}</dd>`;
+  html += `<dt>provider_user_id</dt><dd>${escapeHTML(record['provider_user_id'])}</dd>`;
+  html += `<dt>email</dt><dd>${escapeHTML(record['email'])}</dd>`;
+  html += `<dt>display_name</dt><dd>${escapeHTML(record['display_name'])}</dd>`;
+  html += `<dt>avatar_url</dt><dd>${escapeHTML(record['avatar_url'])}</dd>`;
+  html += `<dt>last_login_at</dt><dd>${escapeHTML(record['last_login_at'])}</dd>`;
+  html += `<dt>role</dt><dd>${escapeHTML(record['role'])}</dd>`;
   html += `</dl></body></html>`;
   return c.html(html);
 });
