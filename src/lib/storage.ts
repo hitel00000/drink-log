@@ -15,7 +15,6 @@ const SAKE_RECORDS_STORE = "sake_records";
 const SAKE_IMAGES_STORE = "sake_images";
 const SAKE_TAGS_STORE = "tags";
 const SAKE_RECORD_TAGS_STORE = "record_tags";
-const CLOUD_IMAGE_SRC_PREFIX = "/api/images?key=";
 const CLOUD_ENTRIES_PATH = "/api/entries";
 const CLOUD_SAKE_RECORDS_PATH = "/api/sake_records";
 const CLOUD_TAGS_PATH = "/api/tags";
@@ -535,14 +534,18 @@ function buildSakeRecordEntry(
       (img.image_key
         ? img.image_key.startsWith("data:") || img.image_key.startsWith("/")
           ? img.image_key
-          : `${CLOUD_IMAGE_SRC_PREFIX}${encodeURIComponent(img.image_key)}`
+          : img.id
+            ? `/api/sake_images/${encodeURIComponent(String(img.id))}/blob/image_key`
+            : ""
         : ""),
     thumbnail_data_url:
       img.thumbnail_data_url ||
       (img.thumbnail_key
         ? img.thumbnail_key.startsWith("data:") || img.thumbnail_key.startsWith("/")
           ? img.thumbnail_key
-          : `${CLOUD_IMAGE_SRC_PREFIX}${encodeURIComponent(img.thumbnail_key)}`
+          : img.id
+            ? `/api/sake_images/${encodeURIComponent(String(img.id))}/blob/thumbnail_key`
+            : null
         : null),
   }));
 

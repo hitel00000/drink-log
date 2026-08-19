@@ -87,10 +87,10 @@
 - [x] **프론트엔드 비원자적 다단계 Fallback 전량 제거 (`src/lib/storage.ts`)**:
   - `saveSakeRecord`, `updateSakeRecord`, `deleteSakeRecord` 내부의 레거시 다단계 HTTP 호출 및 롤백 루프 제거 (~240줄 감축)
   - 미사용 경로 상수(`CLOUD_SAKE_IMAGES_PATH`, `CLOUD_RECORD_TAGS_PATH`) 정리
-- [x] **백엔드 수동 이미지 오버라이드 핸들러 제거 (`functions/api/[[path]].ts`)**:
-  - 최신 `mold_app.ts`에 1-Step Multipart가 정식 탑재됨에 따라 불필요해진 `handleSakeImagesCreate` 및 라우트 제거 (~84줄 감축)
-- [x] **독립 Codegen CLI 피드백 등록**:
-  - `pipe/mold-drinklog/2026-08-19-drinklog-to-mold-cli-codegen-friction.md` 등록
+- [x] **백엔드 수동 이미지 프록시 핸들러 제거 (`functions/api/[[path]].ts` ➔ Mold Native Blob 전환)**:
+  - 수동 `handleImages` (`GET /api/images?key=...`) 및 라우트를 완전 제거하고, Mold Native `GET /api/sake_images/:id/blob/image_key` 및 `thumbnail_key` 엔드포인트로 전환 (~43줄 추가 감축)
+- [x] **독립 Codegen CLI 피드백 및 package.json 연동 완료**:
+  - `pipe/mold-drinklog/2026-08-19-drinklog-to-mold-cli-codegen-friction.md` 등록 및 `npm run codegen` 스크립트 연동 완료
 - [x] **3대 검증 (`typecheck`, `typecheck:functions`, `build`) 0 error 통과 및 번들 최적화 (192KB ➔ 188KB)**
 
 ---
