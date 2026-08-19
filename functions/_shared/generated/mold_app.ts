@@ -319,8 +319,21 @@ app.post('/api/record_tags', async (c) => {
   if (contentType.includes('multipart/form-data')) {
     try {
       formData = await c.req.formData();
+      const jsonPart = formData.get('payload') || formData.get('data');
+      if (jsonPart && typeof jsonPart === 'string') {
+        try {
+          const parsed = JSON.parse(jsonPart);
+          if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+            Object.assign(body, parsed);
+          }
+        } catch (e) {
+          return writeError(c, 400, 'INVALID_JSON', 'failed to parse JSON payload in multipart form');
+        }
+      }
       formData.forEach((val, key) => {
-        if (typeof val === 'string') { body[key] = (val !== '' && !isNaN(Number(val))) ? Number(val) : val; }
+        if (key !== 'payload' && key !== 'data' && typeof val === 'string') {
+          body[key] = (val !== '' && !isNaN(Number(val))) ? Number(val) : val;
+        }
       });
     } catch (e) {
       return writeError(c, 400, 'INVALID_MULTIPART', 'failed to parse multipart body');
@@ -361,6 +374,7 @@ app.post('/api/record_tags', async (c) => {
     }
     return writeError(c, 400, 'INVALID_INPUT', errMsg);
   }
+  const uploadedBlobKeys: string[] = [];
   return c.json({ data: sanitizeRecord(created, []) }, 201);
 });
 
@@ -556,8 +570,21 @@ app.post('/api/sake_images', async (c) => {
   if (contentType.includes('multipart/form-data')) {
     try {
       formData = await c.req.formData();
+      const jsonPart = formData.get('payload') || formData.get('data');
+      if (jsonPart && typeof jsonPart === 'string') {
+        try {
+          const parsed = JSON.parse(jsonPart);
+          if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+            Object.assign(body, parsed);
+          }
+        } catch (e) {
+          return writeError(c, 400, 'INVALID_JSON', 'failed to parse JSON payload in multipart form');
+        }
+      }
       formData.forEach((val, key) => {
-        if (typeof val === 'string') { body[key] = (val !== '' && !isNaN(Number(val))) ? Number(val) : val; }
+        if (key !== 'payload' && key !== 'data' && typeof val === 'string') {
+          body[key] = (val !== '' && !isNaN(Number(val))) ? Number(val) : val;
+        }
       });
     } catch (e) {
       return writeError(c, 400, 'INVALID_MULTIPART', 'failed to parse multipart body');
@@ -621,19 +648,27 @@ app.post('/api/sake_images', async (c) => {
     }
     return writeError(c, 400, 'INVALID_INPUT', errMsg);
   }
+  const uploadedBlobKeys: string[] = [];
   if (created && formData) {
-    const uploadedBlobKeys: string[] = [];
     let blobUploadError: any = null;
     if (!blobUploadError) {
       const file_image_key = formData.get('image_key');
-      if (file_image_key !== null && file_image_key !== undefined && file_image_key !== '') {
-        let fileData_image_key: any = file_image_key;
+      let targetFile_image_key: any = file_image_key;
+      if ((targetFile_image_key === null || targetFile_image_key === undefined || targetFile_image_key === '') && formData.get('file')) {
+        targetFile_image_key = formData.get('file');
+      }
+      if (targetFile_image_key !== null && targetFile_image_key !== undefined && targetFile_image_key !== '') {
+        let fileData_image_key: any = targetFile_image_key;
         let mimeType_image_key = 'application/octet-stream';
         let ext_image_key = '';
-        if (typeof file_image_key === 'object') {
-          mimeType_image_key = (file_image_key as any).type || mimeType_image_key;
-          if ((file_image_key as any).name) { ext_image_key = (file_image_key as any).name.substring((file_image_key as any).name.lastIndexOf('.')); }
-          if (typeof (file_image_key as any).stream === 'function') { fileData_image_key = (file_image_key as any).stream(); }
+        if (typeof targetFile_image_key === 'object' && targetFile_image_key !== null) {
+          mimeType_image_key = (targetFile_image_key as any).type || mimeType_image_key;
+          if ((targetFile_image_key as any).name) { ext_image_key = (targetFile_image_key as any).name.substring((targetFile_image_key as any).name.lastIndexOf('.')); }
+          if (typeof (targetFile_image_key as any).arrayBuffer === 'function') {
+            fileData_image_key = await (targetFile_image_key as any).arrayBuffer();
+          } else if (typeof (targetFile_image_key as any).stream === 'function') {
+            fileData_image_key = (targetFile_image_key as any).stream();
+          }
         }
         const key = `blobs/sake_images/${created.id}/image_key_${Date.now()}${ext_image_key}`;
         try {
@@ -648,14 +683,22 @@ app.post('/api/sake_images', async (c) => {
     }
     if (!blobUploadError) {
       const file_thumbnail_key = formData.get('thumbnail_key');
-      if (file_thumbnail_key !== null && file_thumbnail_key !== undefined && file_thumbnail_key !== '') {
-        let fileData_thumbnail_key: any = file_thumbnail_key;
+      let targetFile_thumbnail_key: any = file_thumbnail_key;
+      if ((targetFile_thumbnail_key === null || targetFile_thumbnail_key === undefined || targetFile_thumbnail_key === '') && formData.get('file')) {
+        targetFile_thumbnail_key = formData.get('file');
+      }
+      if (targetFile_thumbnail_key !== null && targetFile_thumbnail_key !== undefined && targetFile_thumbnail_key !== '') {
+        let fileData_thumbnail_key: any = targetFile_thumbnail_key;
         let mimeType_thumbnail_key = 'application/octet-stream';
         let ext_thumbnail_key = '';
-        if (typeof file_thumbnail_key === 'object') {
-          mimeType_thumbnail_key = (file_thumbnail_key as any).type || mimeType_thumbnail_key;
-          if ((file_thumbnail_key as any).name) { ext_thumbnail_key = (file_thumbnail_key as any).name.substring((file_thumbnail_key as any).name.lastIndexOf('.')); }
-          if (typeof (file_thumbnail_key as any).stream === 'function') { fileData_thumbnail_key = (file_thumbnail_key as any).stream(); }
+        if (typeof targetFile_thumbnail_key === 'object' && targetFile_thumbnail_key !== null) {
+          mimeType_thumbnail_key = (targetFile_thumbnail_key as any).type || mimeType_thumbnail_key;
+          if ((targetFile_thumbnail_key as any).name) { ext_thumbnail_key = (targetFile_thumbnail_key as any).name.substring((targetFile_thumbnail_key as any).name.lastIndexOf('.')); }
+          if (typeof (targetFile_thumbnail_key as any).arrayBuffer === 'function') {
+            fileData_thumbnail_key = await (targetFile_thumbnail_key as any).arrayBuffer();
+          } else if (typeof (targetFile_thumbnail_key as any).stream === 'function') {
+            fileData_thumbnail_key = (targetFile_thumbnail_key as any).stream();
+          }
         }
         const key = `blobs/sake_images/${created.id}/thumbnail_key_${Date.now()}${ext_thumbnail_key}`;
         try {
@@ -903,13 +946,22 @@ app.post('/api/sake_images/:id/upload/image_key', async (c) => {
     return writeError(c, 403, 'FORBIDDEN', 'forbidden');
   }
   const formData = await c.req.formData().catch(() => null);
-  const file = formData ? formData.get('image_key') as File : null;
+  let file = formData ? formData.get('image_key') as File : null;
+  if (!file && formData) {
+    file = formData.get('file') as File;
+  }
   if (!file) {
     return writeError(c, 400, 'VALIDATION_FAILED', 'missing file payload');
   }
   const ext = file.name ? file.name.substring(file.name.lastIndexOf('.')) : '';
   const key = `blobs/sake_images/${id}/image_key_${Date.now()}${ext}`;
-  await c.env.BUCKET.put(key, file.stream(), { httpMetadata: { contentType: file.type } });
+  let fileData: any = file;
+  if (typeof (file as any).arrayBuffer === 'function') {
+    fileData = await (file as any).arrayBuffer();
+  } else if (typeof (file as any).stream === 'function') {
+    fileData = (file as any).stream();
+  }
+  await c.env.BUCKET.put(key, fileData, { httpMetadata: { contentType: file.type } });
   await c.env.DB.prepare('UPDATE "sake_images" SET "image_key" = ? WHERE id = ?').bind(key, id).run();
   return c.json({ data: { image_key: key } });
 });
@@ -990,13 +1042,22 @@ app.post('/api/sake_images/:id/upload/thumbnail_key', async (c) => {
     return writeError(c, 403, 'FORBIDDEN', 'forbidden');
   }
   const formData = await c.req.formData().catch(() => null);
-  const file = formData ? formData.get('thumbnail_key') as File : null;
+  let file = formData ? formData.get('thumbnail_key') as File : null;
+  if (!file && formData) {
+    file = formData.get('file') as File;
+  }
   if (!file) {
     return writeError(c, 400, 'VALIDATION_FAILED', 'missing file payload');
   }
   const ext = file.name ? file.name.substring(file.name.lastIndexOf('.')) : '';
   const key = `blobs/sake_images/${id}/thumbnail_key_${Date.now()}${ext}`;
-  await c.env.BUCKET.put(key, file.stream(), { httpMetadata: { contentType: file.type } });
+  let fileData: any = file;
+  if (typeof (file as any).arrayBuffer === 'function') {
+    fileData = await (file as any).arrayBuffer();
+  } else if (typeof (file as any).stream === 'function') {
+    fileData = (file as any).stream();
+  }
+  await c.env.BUCKET.put(key, fileData, { httpMetadata: { contentType: file.type } });
   await c.env.DB.prepare('UPDATE "sake_images" SET "thumbnail_key" = ? WHERE id = ?').bind(key, id).run();
   return c.json({ data: { thumbnail_key: key } });
 });
@@ -1124,8 +1185,21 @@ app.post('/api/sake_records', async (c) => {
   if (contentType.includes('multipart/form-data')) {
     try {
       formData = await c.req.formData();
+      const jsonPart = formData.get('payload') || formData.get('data');
+      if (jsonPart && typeof jsonPart === 'string') {
+        try {
+          const parsed = JSON.parse(jsonPart);
+          if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+            Object.assign(body, parsed);
+          }
+        } catch (e) {
+          return writeError(c, 400, 'INVALID_JSON', 'failed to parse JSON payload in multipart form');
+        }
+      }
       formData.forEach((val, key) => {
-        if (typeof val === 'string') { body[key] = (val !== '' && !isNaN(Number(val))) ? Number(val) : val; }
+        if (key !== 'payload' && key !== 'data' && typeof val === 'string') {
+          body[key] = (val !== '' && !isNaN(Number(val))) ? Number(val) : val;
+        }
       });
     } catch (e) {
       return writeError(c, 400, 'INVALID_MULTIPART', 'failed to parse multipart body');
@@ -1151,6 +1225,9 @@ app.post('/api/sake_records', async (c) => {
   const nestedWrites: { relName: string; targetTable: string; fkField: string; items: any[]; targetPwdFields: string[] }[] = [];
 
   if (body['images'] !== undefined && body['images'] !== null) {
+    if (typeof body['images'] === 'string') {
+      try { body['images'] = JSON.parse(body['images']); } catch (e) {}
+    }
     if (!Array.isArray(body['images'])) {
       return writeError(c, 400, 'INVALID_INPUT', "nested relation 'images' must be an array of objects");
     }
@@ -1196,6 +1273,9 @@ app.post('/api/sake_records', async (c) => {
   }
 
   if (body['record_tags'] !== undefined && body['record_tags'] !== null) {
+    if (typeof body['record_tags'] === 'string') {
+      try { body['record_tags'] = JSON.parse(body['record_tags']); } catch (e) {}
+    }
     if (!Array.isArray(body['record_tags'])) {
       return writeError(c, 400, 'INVALID_INPUT', "nested relation 'record_tags' must be an array of objects");
     }
@@ -1345,6 +1425,7 @@ app.post('/api/sake_records', async (c) => {
     }
     return writeError(c, 400, 'INVALID_INPUT', errMsg);
   }
+  const uploadedBlobKeys: string[] = [];
 
   // 5. Sequentially create nested child records with compensating rollback on failure
   const createdChildTrackers: { table: string; id: any }[] = [];
@@ -1376,6 +1457,11 @@ app.post('/api/sake_records', async (c) => {
           try {
             await c.env.DB.prepare('DELETE FROM "sake_records" WHERE id = ?').bind(created.id).run();
           } catch (_) {}
+          for (const key of uploadedBlobKeys) {
+            try {
+              await c.env.BUCKET.delete(key);
+            } catch (_) {}
+          }
           const childErrMsg = String(childErr?.message || childErr);
           if (childErrMsg.includes('UNIQUE constraint failed') || childErrMsg.includes('SQLITE_CONSTRAINT')) {
             return writeError(c, 400, 'INVALID_INPUT', `nested record #${idx+1} in 'images' unique constraint failed: ${childErrMsg}`);
@@ -1403,6 +1489,11 @@ app.post('/api/sake_records', async (c) => {
           try {
             await c.env.DB.prepare('DELETE FROM "sake_records" WHERE id = ?').bind(created.id).run();
           } catch (_) {}
+          for (const key of uploadedBlobKeys) {
+            try {
+              await c.env.BUCKET.delete(key);
+            } catch (_) {}
+          }
           const childErrMsg = String(childErr?.message || childErr);
           if (childErrMsg.includes('UNIQUE constraint failed') || childErrMsg.includes('SQLITE_CONSTRAINT')) {
             return writeError(c, 400, 'INVALID_INPUT', `nested record #${idx+1} in 'record_tags' unique constraint failed: ${childErrMsg}`);
@@ -1810,8 +1901,21 @@ app.post('/api/tags', async (c) => {
   if (contentType.includes('multipart/form-data')) {
     try {
       formData = await c.req.formData();
+      const jsonPart = formData.get('payload') || formData.get('data');
+      if (jsonPart && typeof jsonPart === 'string') {
+        try {
+          const parsed = JSON.parse(jsonPart);
+          if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+            Object.assign(body, parsed);
+          }
+        } catch (e) {
+          return writeError(c, 400, 'INVALID_JSON', 'failed to parse JSON payload in multipart form');
+        }
+      }
       formData.forEach((val, key) => {
-        if (typeof val === 'string') { body[key] = (val !== '' && !isNaN(Number(val))) ? Number(val) : val; }
+        if (key !== 'payload' && key !== 'data' && typeof val === 'string') {
+          body[key] = (val !== '' && !isNaN(Number(val))) ? Number(val) : val;
+        }
       });
     } catch (e) {
       return writeError(c, 400, 'INVALID_MULTIPART', 'failed to parse multipart body');
@@ -1878,6 +1982,7 @@ app.post('/api/tags', async (c) => {
     }
     return writeError(c, 400, 'INVALID_INPUT', errMsg);
   }
+  const uploadedBlobKeys: string[] = [];
   return c.json({ data: sanitizeRecord(created, []) }, 201);
 });
 
@@ -2120,8 +2225,21 @@ app.post('/api/users', async (c) => {
   if (contentType.includes('multipart/form-data')) {
     try {
       formData = await c.req.formData();
+      const jsonPart = formData.get('payload') || formData.get('data');
+      if (jsonPart && typeof jsonPart === 'string') {
+        try {
+          const parsed = JSON.parse(jsonPart);
+          if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+            Object.assign(body, parsed);
+          }
+        } catch (e) {
+          return writeError(c, 400, 'INVALID_JSON', 'failed to parse JSON payload in multipart form');
+        }
+      }
       formData.forEach((val, key) => {
-        if (typeof val === 'string') { body[key] = (val !== '' && !isNaN(Number(val))) ? Number(val) : val; }
+        if (key !== 'payload' && key !== 'data' && typeof val === 'string') {
+          body[key] = (val !== '' && !isNaN(Number(val))) ? Number(val) : val;
+        }
       });
     } catch (e) {
       return writeError(c, 400, 'INVALID_MULTIPART', 'failed to parse multipart body');
@@ -2183,6 +2301,7 @@ app.post('/api/users', async (c) => {
     }
     return writeError(c, 400, 'INVALID_INPUT', errMsg);
   }
+  const uploadedBlobKeys: string[] = [];
   return c.json({ data: sanitizeRecord(created, []) }, 201);
 });
 
