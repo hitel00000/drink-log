@@ -213,86 +213,6 @@ function extractR2Key(val: string | null | undefined): string | null {
   return null;
 }
 
-export async function handleSakeImagesCreate(request: Request, env: AppEnv) {
-  const session = await readSession(request, env);
-  if (!session) {
-    return new Response(JSON.stringify({ error: "Unauthorized" }), {
-      status: 401,
-      headers: { "Content-Type": "application/json" },
-    });
-  }
-
-  let body: any;
-  try {
-    body = await request.json();
-  } catch (e) {
-    return new Response(JSON.stringify({ error: "Invalid JSON body" }), {
-      status: 400,
-      headers: { "Content-Type": "application/json" },
-    });
-  }
-
-  const recordId = Number(body.record_id);
-  if (isNaN(recordId)) {
-    return new Response(JSON.stringify({ error: "record_id must be a number" }), {
-      status: 400,
-      headers: { "Content-Type": "application/json" },
-    });
-  }
-
-  const mimeType = typeof body.mime_type === "string" ? body.mime_type.trim() : "image/jpeg";
-  const fileName = typeof body.file_name === "string" ? body.file_name.trim() : "photo.jpg";
-  const displayOrder = typeof body.display_order === "number" ? body.display_order : 0;
-  const imageId = crypto.randomUUID();
-  const ext = fileName.includes(".") ? fileName.substring(fileName.lastIndexOf(".")) : ".jpg";
-
-  const bucket = getImagesBucket(env);
-
-  // Check if this is an existing image key or a new base64 data upload
-  const existingImageKey = extractR2Key(body.image_key);
-  const existingThumbKey = extractR2Key(body.thumbnail_key);
-
-  let imageKey = existingImageKey ?? `images/${session.userId}/sake/${recordId}/${imageId}${ext}`;
-  let thumbnailKey = existingThumbKey ?? `thumbnails/${session.userId}/sake/${recordId}/${imageId}.webp`;
-
-  // 1. Upload original to R2 if provided as Data URL
-  if (typeof body.image_key === "string" && body.image_key.startsWith("data:")) {
-    const orig = parseDataUrl(body.image_key);
-    if (orig) {
-      imageKey = `images/${session.userId}/sake/${recordId}/${imageId}${ext}`;
-      await bucket.put(imageKey, orig.bytes, {
-        httpMetadata: { contentType: mimeType || orig.mimeType },
-      });
-    }
-  }
-
-  // 2. Upload thumbnail to R2 if provided as Data URL
-  if (typeof body.thumbnail_key === "string" && body.thumbnail_key.startsWith("data:")) {
-    const thumb = parseDataUrl(body.thumbnail_key);
-    if (thumb) {
-      thumbnailKey = `thumbnails/${session.userId}/sake/${recordId}/${imageId}.webp`;
-      await bucket.put(thumbnailKey, thumb.bytes, {
-        httpMetadata: { contentType: "image/webp" },
-      });
-    }
-  }
-
-  // 3. Insert metadata into D1
-  const now = new Date().toISOString();
-  const created = await getDatabase(env)
-    .prepare(
-      `INSERT INTO sake_images (owner_id, record_id, image_key, thumbnail_key, mime_type, file_name, display_order, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`
-    )
-    .bind(session.userId, recordId, imageKey, thumbnailKey, mimeType, fileName, displayOrder, now, now)
-    .first();
-
-  return new Response(JSON.stringify({ data: created }), {
-    status: 201,
-    headers: { "Content-Type": "application/json" },
-  });
-}
-
 export async function handleImages(request: Request, env: AppEnv) {
   const session = await readSession(request, env);
   if (!session) {
@@ -926,10 +846,6 @@ export const onRequest: PagesFunction<AppEnv> = async (context) => {
     if (request.method === "DELETE") {
       return handleEntriesDelete(request, env, entryId);
     }
-  }
-
-  if (pathname === "/api/sake_images" && request.method === "POST") {
-    return handleSakeImagesCreate(request, env);
   }
 
   const db = getDatabase(env);

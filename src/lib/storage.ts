@@ -18,9 +18,7 @@ const SAKE_RECORD_TAGS_STORE = "record_tags";
 const CLOUD_IMAGE_SRC_PREFIX = "/api/images?key=";
 const CLOUD_ENTRIES_PATH = "/api/entries";
 const CLOUD_SAKE_RECORDS_PATH = "/api/sake_records";
-const CLOUD_SAKE_IMAGES_PATH = "/api/sake_images";
 const CLOUD_TAGS_PATH = "/api/tags";
-const CLOUD_RECORD_TAGS_PATH = "/api/record_tags";
 const LOCAL_OWNER_ID = "local";
 const MAX_CUSTOM_TAG_LABEL_LENGTH = 20;
 
@@ -706,111 +704,14 @@ export async function saveSakeRecord(
   const now = new Date().toISOString();
 
   if (cloudStorageEnabled) {
-    try {
-      const entry = await cloudFetchData<SakeRecordEntry>(CLOUD_ENTRIES_PATH, {
-        method: "POST",
-        body: JSON.stringify(draft),
-      });
-      if (entry && entry.id) {
-        return entry;
-      }
-    } catch (error) {
-      console.warn("One-shot POST /api/entries failed, falling back to legacy multi-step:", error);
+    const entry = await cloudFetchData<SakeRecordEntry>(CLOUD_ENTRIES_PATH, {
+      method: "POST",
+      body: JSON.stringify(draft),
+    });
+    if (!entry || !entry.id) {
+      throw new Error("Failed to save sake record: invalid response");
     }
-
-    let createdRecordId: number | string | null = null;
-    const createdImageIds: (number | string)[] = [];
-    const createdRecordTagIds: (number | string)[] = [];
-
-    try {
-      const recordBody = {
-        drink_type: "sake",
-        name: draft.name.trim(),
-        region: draft.region.trim() || null,
-        brewery: draft.brewery.trim() || null,
-        rice: draft.rice.trim() || null,
-        sake_type: draft.sake_type.trim() || null,
-        sake_meter_value: draft.sake_meter_value.trim() || null,
-        abv: draft.abv.trim() || null,
-        volume: draft.volume.trim() || null,
-        price: draft.price.trim() || null,
-        drink_again: draft.drink_again,
-        sweet_dry: draft.sweet_dry,
-        aroma_intensity: draft.aroma_intensity,
-        acidity: draft.acidity,
-        clean_umami: draft.clean_umami,
-        one_line_note: draft.one_line_note.trim() || null,
-        place: draft.place.trim() || null,
-        consumed_date: draft.consumed_date,
-        companions: draft.companions.trim() || null,
-        food_pairing: draft.food_pairing.trim() || null,
-      };
-
-      const record = await cloudFetchData<SakeRecord>(CLOUD_SAKE_RECORDS_PATH, {
-        method: "POST",
-        body: JSON.stringify(recordBody),
-      });
-      createdRecordId = record.id;
-
-      for (const imgDraft of draft.images) {
-        const imgBody = {
-          record_id: Number(createdRecordId),
-          image_key: imgDraft.data_url,
-          thumbnail_key: imgDraft.thumbnail_data_url || null,
-          mime_type: imgDraft.mime_type || "image/jpeg",
-          file_name: imgDraft.file_name || "photo.jpg",
-          display_order: Number(imgDraft.display_order ?? 0),
-        };
-        const createdImg = await cloudFetchData<SakeImage>(CLOUD_SAKE_IMAGES_PATH, {
-          method: "POST",
-          body: JSON.stringify(imgBody),
-        });
-        if (createdImg?.id) {
-          createdImageIds.push(createdImg.id);
-        }
-      }
-
-      for (const tagId of draft.selected_tag_ids) {
-        const rtBody = {
-          sake_record_id: createdRecordId,
-          tag_id: tagId,
-        };
-        const createdRt = await cloudFetchData<SakeRecordTag>(CLOUD_RECORD_TAGS_PATH, {
-          method: "POST",
-          body: JSON.stringify(rtBody),
-        });
-        if (createdRt?.id) {
-          createdRecordTagIds.push(createdRt.id);
-        }
-      }
-
-      const entry = await getSakeRecordById(createdRecordId);
-      if (!entry) {
-        throw new Error("Failed to load saved sake record");
-      }
-      return entry;
-    } catch (error) {
-      console.error("Save sake record failed. Rolling back all created items...", error);
-
-      for (const rtId of createdRecordTagIds) {
-        await cloudRequest(`${CLOUD_RECORD_TAGS_PATH}/${encodeURIComponent(String(rtId))}`, {
-          method: "DELETE",
-        }).catch(() => {});
-      }
-
-      for (const imgId of createdImageIds) {
-        await cloudRequest(`${CLOUD_SAKE_IMAGES_PATH}/${encodeURIComponent(String(imgId))}`, {
-          method: "DELETE",
-        }).catch(() => {});
-      }
-
-      if (createdRecordId !== null) {
-        await cloudRequest(`${CLOUD_SAKE_RECORDS_PATH}/${encodeURIComponent(String(createdRecordId))}`, {
-          method: "DELETE",
-        }).catch(() => {});
-      }
-      throw error;
-    }
+    return entry;
   }
 
   const recordId = crypto.randomUUID();
@@ -853,98 +754,15 @@ export async function updateSakeRecord(
   ownerId: number | string = LOCAL_OWNER_ID,
 ): Promise<SakeRecordEntry> {
   if (cloudStorageEnabled) {
-    try {
-      const entry = await cloudFetchData<SakeRecordEntry>(
-        `${CLOUD_ENTRIES_PATH}/${encodeURIComponent(String(id))}`,
-        {
-          method: "PUT",
-          body: JSON.stringify(draft),
-        },
-      );
-      if (entry && entry.id) {
-        return entry;
-      }
-    } catch (err) {
-      console.warn("One-shot PUT /api/entries/:id failed, falling back to legacy update:", err);
-    }
-
-    const recordBody = {
-      name: draft.name.trim(),
-      region: draft.region.trim() || null,
-      brewery: draft.brewery.trim() || null,
-      rice: draft.rice.trim() || null,
-      sake_type: draft.sake_type.trim() || null,
-      sake_meter_value: draft.sake_meter_value.trim() || null,
-      abv: draft.abv.trim() || null,
-      volume: draft.volume.trim() || null,
-      price: draft.price.trim() || null,
-      drink_again: draft.drink_again,
-      sweet_dry: draft.sweet_dry,
-      aroma_intensity: draft.aroma_intensity,
-      acidity: draft.acidity,
-      clean_umami: draft.clean_umami,
-      one_line_note: draft.one_line_note.trim() || null,
-      place: draft.place.trim() || null,
-      consumed_date: draft.consumed_date,
-      companions: draft.companions.trim() || null,
-      food_pairing: draft.food_pairing.trim() || null,
-    };
-
-    await cloudFetchData<SakeRecord>(`${CLOUD_SAKE_RECORDS_PATH}/${encodeURIComponent(String(id))}`, {
-      method: "PUT",
-      body: JSON.stringify(recordBody),
-    });
-
-    const [existingImages, existingRecordTags] = await Promise.all([
-      fetchAllPages<SakeImage>(CLOUD_SAKE_IMAGES_PATH),
-      fetchAllPages<SakeRecordTag>(CLOUD_RECORD_TAGS_PATH),
-    ]);
-
-    const targetImages = existingImages.filter((img) => String(img.record_id) === String(id));
-    const targetRecordTags = existingRecordTags.filter(
-      (rt) => String(rt.sake_record_id ?? rt.record_id) === String(id),
+    const entry = await cloudFetchData<SakeRecordEntry>(
+      `${CLOUD_ENTRIES_PATH}/${encodeURIComponent(String(id))}`,
+      {
+        method: "PUT",
+        body: JSON.stringify(draft),
+      },
     );
-
-    await Promise.all([
-      ...targetImages.map((img) =>
-        cloudRequest(`${CLOUD_SAKE_IMAGES_PATH}/${encodeURIComponent(String(img.id))}`, { method: "DELETE" }),
-      ),
-      ...targetRecordTags.map((rt) =>
-        rt.id
-          ? cloudRequest(`${CLOUD_RECORD_TAGS_PATH}/${encodeURIComponent(String(rt.id))}`, { method: "DELETE" })
-          : Promise.resolve(),
-      ),
-    ]);
-
-    for (const imgDraft of draft.images) {
-      const imgBody = {
-        record_id: Number(id),
-        image_key: imgDraft.data_url,
-        thumbnail_key: imgDraft.thumbnail_data_url || null,
-        mime_type: imgDraft.mime_type || "image/jpeg",
-        file_name: imgDraft.file_name || "photo.jpg",
-        display_order: Number(imgDraft.display_order ?? 0),
-      };
-      await cloudFetchData<SakeImage>(CLOUD_SAKE_IMAGES_PATH, {
-        method: "POST",
-        body: JSON.stringify(imgBody),
-      });
-    }
-
-    for (const tagId of draft.selected_tag_ids) {
-      const rtBody = {
-        sake_record_id: id,
-        tag_id: tagId,
-      };
-      await cloudFetchData<SakeRecordTag>(CLOUD_RECORD_TAGS_PATH, {
-        method: "POST",
-        body: JSON.stringify(rtBody),
-      });
-    }
-
-    const entry = await getSakeRecordById(id);
-    if (!entry) {
-      throw new Error("Failed to load updated sake record");
+    if (!entry || !entry.id) {
+      throw new Error("Failed to update sake record: invalid response");
     }
     return entry;
   }
@@ -1010,37 +828,7 @@ export async function deleteSakeRecord(
   ownerId: number | string = LOCAL_OWNER_ID,
 ): Promise<void> {
   if (cloudStorageEnabled) {
-    try {
-      await cloudRequest<void>(`${CLOUD_ENTRIES_PATH}/${encodeURIComponent(String(id))}`, {
-        method: "DELETE",
-      });
-      return;
-    } catch (err) {
-      console.warn("One-shot DELETE /api/entries/:id failed, falling back to legacy delete:", err);
-    }
-
-    const [existingImages, existingRecordTags] = await Promise.all([
-      fetchAllPages<SakeImage>(CLOUD_SAKE_IMAGES_PATH),
-      fetchAllPages<SakeRecordTag>(CLOUD_RECORD_TAGS_PATH),
-    ]);
-
-    const targetImages = existingImages.filter((img) => String(img.record_id) === String(id));
-    const targetRecordTags = existingRecordTags.filter(
-      (rt) => String(rt.sake_record_id ?? rt.record_id) === String(id),
-    );
-
-    await Promise.all([
-      ...targetRecordTags.map((rt) =>
-        rt.id
-          ? cloudRequest(`${CLOUD_RECORD_TAGS_PATH}/${encodeURIComponent(String(rt.id))}`, { method: "DELETE" })
-          : Promise.resolve(),
-      ),
-      ...targetImages.map((img) =>
-        cloudRequest(`${CLOUD_SAKE_IMAGES_PATH}/${encodeURIComponent(String(img.id))}`, { method: "DELETE" }),
-      ),
-    ]);
-
-    await cloudRequest<void>(`${CLOUD_SAKE_RECORDS_PATH}/${encodeURIComponent(String(id))}`, {
+    await cloudRequest<void>(`${CLOUD_ENTRIES_PATH}/${encodeURIComponent(String(id))}`, {
       method: "DELETE",
     });
     return;

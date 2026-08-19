@@ -83,6 +83,16 @@
 - [x] **3대 검증 (`typecheck`, `typecheck:functions`, `build`) 및 무결성 확인**:
   - 타입체크 및 프로덕션 빌드 0 error 검증 완료
 
+### 마일스톤 7: 레거시 다단계 Fallback 및 수동 이미지 핸들러 전량 클린업 (완료)
+- [x] **프론트엔드 비원자적 다단계 Fallback 전량 제거 (`src/lib/storage.ts`)**:
+  - `saveSakeRecord`, `updateSakeRecord`, `deleteSakeRecord` 내부의 레거시 다단계 HTTP 호출 및 롤백 루프 제거 (~240줄 감축)
+  - 미사용 경로 상수(`CLOUD_SAKE_IMAGES_PATH`, `CLOUD_RECORD_TAGS_PATH`) 정리
+- [x] **백엔드 수동 이미지 오버라이드 핸들러 제거 (`functions/api/[[path]].ts`)**:
+  - 최신 `mold_app.ts`에 1-Step Multipart가 정식 탑재됨에 따라 불필요해진 `handleSakeImagesCreate` 및 라우트 제거 (~84줄 감축)
+- [x] **독립 Codegen CLI 피드백 등록**:
+  - `pipe/mold-drinklog/2026-08-19-drinklog-to-mold-cli-codegen-friction.md` 등록
+- [x] **3대 검증 (`typecheck`, `typecheck:functions`, `build`) 0 error 통과 및 번들 최적화 (192KB ➔ 188KB)**
+
 ---
 
 ## 📋 향후 백로그 및 유지 관리 정책 (Backlog & Maintenance Policy)
