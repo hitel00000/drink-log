@@ -93,11 +93,26 @@
   - `pipe/mold-drinklog/2026-08-19-drinklog-to-mold-cli-codegen-friction.md` 등록 및 `npm run codegen` 스크립트 연동 완료
 - [x] **3대 검증 (`typecheck`, `typecheck:functions`, `build`) 0 error 통과 및 번들 최적화 (192KB ➔ 188KB)**
 
+### 마일스톤 8: 모두의 시음 피드 (둘러보기) & 검증된 사케 큐레이션 필터 구현 (완료)
+- [x] **Mold 스키마 읽기 권한 개방 & 관계 Eager Loading**:
+  - `resources/SakeRecord.yaml`, `resources/SakeImage.yaml`, `resources/Tag.yaml`의 읽기 권한을 `authenticated`로 전환
+  - `npm run codegen`을 통해 안전하게 Mold Native 런타임 갱신
+  - `src/lib/storage.ts`의 `loadSakeRecords` 및 `getSakeRecordById`에서 `include=images,record_tags,owner`로 작성자 프로필 동시 로드
+- [x] **3단 뷰 스위처 (`기록 작성` / `내 저널` / `둘러보기`)**:
+  - 상단 탭에 `내 저널 (${myRecords.length})`과 `둘러보기 (${feedRecords.length})`를 분리하여 개인 아카이브와 공개 탐색 경험을 명확히 분리
+- [x] **방안 A: 검증된 사케 큐레이션 필터 & 실시간 검색**:
+  - 둘러보기 피드 상단에 `[전체]`, `[✨ 호평 사케]`, `[🤔 호불호/보통]`, `[💧 아쉬움]` 4단 필터 칩 적용
+  - 검색창에서 사케 이름, 양조장, 태그, 장소뿐만 아니라 **작성자 닉네임**까지 즉시 실시간 필터링
+- [x] **피드 카드 & 상세 뷰 작성자 뱃지 및 권한 제어**:
+  - 둘러보기 카드에 작성자 아바타, 닉네임, 시음일자 노출
+  - 다른 사람의 기록 상세 뷰에서는 작성자 프로필 카드 노출 및 수정/삭제 권한 버튼 안전하게 숨김 처리
+- [x] **3대 검증 (`typecheck`, `typecheck:functions`, `build`) 0 error 통과**
+
 ---
 
 ## 📋 향후 백로그 및 유지 관리 정책 (Backlog & Maintenance Policy)
 
-현재 사케 전용 테이스팅 저널의 핵심 기능, 웜 리넨 미니멀 디자인 시스템, Mold Native 읽기 최적화 및 안정적인 Edge BFF 쓰기 파이프라인이 100% 완비되었습니다. 
+현재 사케 전용 테이스팅 저널의 핵심 기능, 웜 리넨 미니멀 디자인 시스템, 모두의 시음 피드 둘러보기, Mold Native 읽기 최적화 및 안정적인 Edge BFF 쓰기 파이프라인이 100% 완비되었습니다. 
 
 `AGENTS.md`의 최우선 원칙에 따라, 작고 단단한 모바일 기록 경험을 유지하기 위해 당분간 신규 기능 추가 없이 **실사용 안정성 및 유지보수**에 집중합니다.
 

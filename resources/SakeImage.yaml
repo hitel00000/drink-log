@@ -47,6 +47,6 @@ auth:
   ownership_field: owner_id
   permissions:
     create: authenticated
-    read: owner
+    read: authenticated
     update: owner
     delete: owner

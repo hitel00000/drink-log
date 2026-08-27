@@ -106,16 +106,16 @@ app.get('/', (c) => c.text('Mold Cloudflare Workers Target API'));
 
 const relMetadata: Record<string, Record<string, { kind: string; targetTable: string; fk: string; permRead: string; ownershipField: string; softDelete: boolean; pwdFields: string[] }>> = {
   'record_tags': {
-    'sake_record': { kind: 'belongs_to', targetTable: 'sake_records', fk: 'sake_record_id', permRead: 'owner', ownershipField: 'owner_id', softDelete: false, pwdFields: [] },
-    'tag': { kind: 'belongs_to', targetTable: 'tags', fk: 'tag_id', permRead: 'owner', ownershipField: 'owner_id', softDelete: false, pwdFields: [] },
+    'sake_record': { kind: 'belongs_to', targetTable: 'sake_records', fk: 'sake_record_id', permRead: 'authenticated', ownershipField: 'owner_id', softDelete: false, pwdFields: [] },
+    'tag': { kind: 'belongs_to', targetTable: 'tags', fk: 'tag_id', permRead: 'authenticated', ownershipField: 'owner_id', softDelete: false, pwdFields: [] },
   },
   'sake_images': {
     'owner': { kind: 'belongs_to', targetTable: 'users', fk: 'owner_id', permRead: 'authenticated', ownershipField: 'id', softDelete: false, pwdFields: [] },
-    'record': { kind: 'belongs_to', targetTable: 'sake_records', fk: 'record_id', permRead: 'owner', ownershipField: 'owner_id', softDelete: false, pwdFields: [] },
+    'record': { kind: 'belongs_to', targetTable: 'sake_records', fk: 'record_id', permRead: 'authenticated', ownershipField: 'owner_id', softDelete: false, pwdFields: [] },
   },
   'sake_records': {
     'owner': { kind: 'belongs_to', targetTable: 'users', fk: 'owner_id', permRead: 'authenticated', ownershipField: 'id', softDelete: false, pwdFields: [] },
-    'images': { kind: 'has_many', targetTable: 'sake_images', fk: 'record_id', permRead: 'owner', ownershipField: 'owner_id', softDelete: false, pwdFields: [] },
+    'images': { kind: 'has_many', targetTable: 'sake_images', fk: 'record_id', permRead: 'authenticated', ownershipField: 'owner_id', softDelete: false, pwdFields: [] },
     'record_tags': { kind: 'has_many', targetTable: 'record_tags', fk: 'sake_record_id', permRead: 'authenticated', ownershipField: '', softDelete: false, pwdFields: [] },
   },
   'tags': {
@@ -506,19 +506,14 @@ app.get('/view/record_tags/:id', async (c) => {
 // LIST /api/sake_images
 app.get('/api/sake_images', async (c) => {
   const authUser = await getAuthUser(c);
+  if (!authUser) {
+    return writeError(c, 401, 'UNAUTHORIZED', 'authentication required');
+  }
   const limit = Math.min(parseInt(c.req.query('limit') || '20', 10), 100);
   const offset = Math.max(parseInt(c.req.query('offset') || '0', 10), 0);
 
   const whereConds: string[] = [];
   const params: any[] = [];
-  if (!authUser || authUser.role !== 'admin') {
-    if (authUser) {
-      whereConds.push('("owner_id" = ? OR "owner_id" IS NULL)');
-      params.push(authUser.id);
-    } else {
-      whereConds.push('"owner_id" IS NULL');
-    }
-  }
   const whereClause = whereConds.length > 0 ? ' WHERE ' + whereConds.join(' AND ') : '';
   const countSql = `SELECT COUNT(*) as total FROM "sake_images"${whereClause}`;
   const countStmt = await c.env.DB.prepare(countSql).bind(...params).first<{ total: number }>();
@@ -537,19 +532,13 @@ app.get('/api/sake_images', async (c) => {
 // DETAIL /api/sake_images/:id
 app.get('/api/sake_images/:id', async (c) => {
   const authUser = await getAuthUser(c);
+  if (!authUser) {
+    return writeError(c, 401, 'UNAUTHORIZED', 'authentication required');
+  }
   const id = c.req.param('id');
   const record = await c.env.DB.prepare('SELECT * FROM "sake_images" WHERE id = ?').bind(id).first();
   if (!record) {
     return writeError(c, 404, 'NOT_FOUND', 'record not found');
-  }
-  const ownerVal = (record as any)['owner_id'];
-  if (ownerVal !== null && ownerVal !== undefined) {
-    if (!authUser) {
-      return writeError(c, 401, 'UNAUTHORIZED', 'authentication required');
-    }
-    if (authUser.role !== 'admin' && ownerVal != authUser.id) {
-      return writeError(c, 403, 'FORBIDDEN', 'forbidden');
-    }
   }
   const sanitized = sanitizeRecord(record, []);
   const incErr = await processIncludes(c, 'sake_images', [sanitized], c.req.query('include'), authUser);
@@ -840,14 +829,6 @@ app.get('/view/sake_images', async (c) => {
   const authUser = await getAuthUser(c);
   const whereConds: string[] = [];
   const params: any[] = [];
-  if (!authUser || authUser.role !== 'admin') {
-    if (authUser) {
-      whereConds.push('("owner_id" = ? OR "owner_id" IS NULL)');
-      params.push(authUser.id);
-    } else {
-      whereConds.push('"owner_id" IS NULL');
-    }
-  }
   const whereClause = whereConds.length > 0 ? ' WHERE ' + whereConds.join(' AND ') : '';
   const { results } = await c.env.DB.prepare(`SELECT * FROM "sake_images"${whereClause} ORDER BY id ASC`).bind(...params).all();
   const viewRecs = (results || []) as any[];
@@ -971,19 +952,13 @@ app.post('/api/sake_images/:id/upload/image_key', async (c) => {
 // DOWNLOAD BLOB /api/sake_images/:id/blob/image_key
 app.get('/api/sake_images/:id/blob/image_key', async (c) => {
   const authUser = await getAuthUser(c);
+  if (!authUser) {
+    return writeError(c, 401, 'UNAUTHORIZED', 'authentication required');
+  }
   const id = c.req.param('id');
   const record = await c.env.DB.prepare('SELECT * FROM "sake_images" WHERE id = ?').bind(id).first<any>();
   if (!record) {
     return writeError(c, 404, 'NOT_FOUND', 'record not found');
-  }
-  const ownerVal = record['owner_id'];
-  if (ownerVal !== null && ownerVal !== undefined) {
-    if (!authUser) {
-      return writeError(c, 401, 'UNAUTHORIZED', 'authentication required');
-    }
-    if (authUser.role !== 'admin' && ownerVal != authUser.id) {
-      return writeError(c, 403, 'FORBIDDEN', 'forbidden');
-    }
   }
   const key = record['image_key'];
   if (!key) {
@@ -1067,19 +1042,13 @@ app.post('/api/sake_images/:id/upload/thumbnail_key', async (c) => {
 // DOWNLOAD BLOB /api/sake_images/:id/blob/thumbnail_key
 app.get('/api/sake_images/:id/blob/thumbnail_key', async (c) => {
   const authUser = await getAuthUser(c);
+  if (!authUser) {
+    return writeError(c, 401, 'UNAUTHORIZED', 'authentication required');
+  }
   const id = c.req.param('id');
   const record = await c.env.DB.prepare('SELECT * FROM "sake_images" WHERE id = ?').bind(id).first<any>();
   if (!record) {
     return writeError(c, 404, 'NOT_FOUND', 'record not found');
-  }
-  const ownerVal = record['owner_id'];
-  if (ownerVal !== null && ownerVal !== undefined) {
-    if (!authUser) {
-      return writeError(c, 401, 'UNAUTHORIZED', 'authentication required');
-    }
-    if (authUser.role !== 'admin' && ownerVal != authUser.id) {
-      return writeError(c, 403, 'FORBIDDEN', 'forbidden');
-    }
   }
   const key = record['thumbnail_key'];
   if (!key) {
@@ -1123,19 +1092,14 @@ app.delete('/api/sake_images/:id/blob/thumbnail_key', async (c) => {
 // LIST /api/sake_records
 app.get('/api/sake_records', async (c) => {
   const authUser = await getAuthUser(c);
+  if (!authUser) {
+    return writeError(c, 401, 'UNAUTHORIZED', 'authentication required');
+  }
   const limit = Math.min(parseInt(c.req.query('limit') || '20', 10), 100);
   const offset = Math.max(parseInt(c.req.query('offset') || '0', 10), 0);
 
   const whereConds: string[] = [];
   const params: any[] = [];
-  if (!authUser || authUser.role !== 'admin') {
-    if (authUser) {
-      whereConds.push('("owner_id" = ? OR "owner_id" IS NULL)');
-      params.push(authUser.id);
-    } else {
-      whereConds.push('"owner_id" IS NULL');
-    }
-  }
   const whereClause = whereConds.length > 0 ? ' WHERE ' + whereConds.join(' AND ') : '';
   const countSql = `SELECT COUNT(*) as total FROM "sake_records"${whereClause}`;
   const countStmt = await c.env.DB.prepare(countSql).bind(...params).first<{ total: number }>();
@@ -1154,19 +1118,13 @@ app.get('/api/sake_records', async (c) => {
 // DETAIL /api/sake_records/:id
 app.get('/api/sake_records/:id', async (c) => {
   const authUser = await getAuthUser(c);
+  if (!authUser) {
+    return writeError(c, 401, 'UNAUTHORIZED', 'authentication required');
+  }
   const id = c.req.param('id');
   const record = await c.env.DB.prepare('SELECT * FROM "sake_records" WHERE id = ?').bind(id).first();
   if (!record) {
     return writeError(c, 404, 'NOT_FOUND', 'record not found');
-  }
-  const ownerVal = (record as any)['owner_id'];
-  if (ownerVal !== null && ownerVal !== undefined) {
-    if (!authUser) {
-      return writeError(c, 401, 'UNAUTHORIZED', 'authentication required');
-    }
-    if (authUser.role !== 'admin' && ownerVal != authUser.id) {
-      return writeError(c, 403, 'FORBIDDEN', 'forbidden');
-    }
   }
   const sanitized = sanitizeRecord(record, []);
   const incErr = await processIncludes(c, 'sake_records', [sanitized], c.req.query('include'), authUser);
@@ -1699,14 +1657,6 @@ app.get('/view/sake_records', async (c) => {
   const authUser = await getAuthUser(c);
   const whereConds: string[] = [];
   const params: any[] = [];
-  if (!authUser || authUser.role !== 'admin') {
-    if (authUser) {
-      whereConds.push('("owner_id" = ? OR "owner_id" IS NULL)');
-      params.push(authUser.id);
-    } else {
-      whereConds.push('"owner_id" IS NULL');
-    }
-  }
   const whereClause = whereConds.length > 0 ? ' WHERE ' + whereConds.join(' AND ') : '';
   const { results } = await c.env.DB.prepare(`SELECT * FROM "sake_records"${whereClause} ORDER BY id ASC`).bind(...params).all();
   const viewRecs = (results || []) as any[];
@@ -1846,19 +1796,14 @@ app.get('/view/sake_records/:id', async (c) => {
 // LIST /api/tags
 app.get('/api/tags', async (c) => {
   const authUser = await getAuthUser(c);
+  if (!authUser) {
+    return writeError(c, 401, 'UNAUTHORIZED', 'authentication required');
+  }
   const limit = Math.min(parseInt(c.req.query('limit') || '20', 10), 100);
   const offset = Math.max(parseInt(c.req.query('offset') || '0', 10), 0);
 
   const whereConds: string[] = [];
   const params: any[] = [];
-  if (!authUser || authUser.role !== 'admin') {
-    if (authUser) {
-      whereConds.push('("owner_id" = ? OR "owner_id" IS NULL)');
-      params.push(authUser.id);
-    } else {
-      whereConds.push('"owner_id" IS NULL');
-    }
-  }
   const whereClause = whereConds.length > 0 ? ' WHERE ' + whereConds.join(' AND ') : '';
   const countSql = `SELECT COUNT(*) as total FROM "tags"${whereClause}`;
   const countStmt = await c.env.DB.prepare(countSql).bind(...params).first<{ total: number }>();
@@ -1877,19 +1822,13 @@ app.get('/api/tags', async (c) => {
 // DETAIL /api/tags/:id
 app.get('/api/tags/:id', async (c) => {
   const authUser = await getAuthUser(c);
+  if (!authUser) {
+    return writeError(c, 401, 'UNAUTHORIZED', 'authentication required');
+  }
   const id = c.req.param('id');
   const record = await c.env.DB.prepare('SELECT * FROM "tags" WHERE id = ?').bind(id).first();
   if (!record) {
     return writeError(c, 404, 'NOT_FOUND', 'record not found');
-  }
-  const ownerVal = (record as any)['owner_id'];
-  if (ownerVal !== null && ownerVal !== undefined) {
-    if (!authUser) {
-      return writeError(c, 401, 'UNAUTHORIZED', 'authentication required');
-    }
-    if (authUser.role !== 'admin' && ownerVal != authUser.id) {
-      return writeError(c, 403, 'FORBIDDEN', 'forbidden');
-    }
   }
   const sanitized = sanitizeRecord(record, []);
   const incErr = await processIncludes(c, 'tags', [sanitized], c.req.query('include'), authUser);
@@ -2101,14 +2040,6 @@ app.get('/view/tags', async (c) => {
   const authUser = await getAuthUser(c);
   const whereConds: string[] = [];
   const params: any[] = [];
-  if (!authUser || authUser.role !== 'admin') {
-    if (authUser) {
-      whereConds.push('("owner_id" = ? OR "owner_id" IS NULL)');
-      params.push(authUser.id);
-    } else {
-      whereConds.push('"owner_id" IS NULL');
-    }
-  }
   const whereClause = whereConds.length > 0 ? ' WHERE ' + whereConds.join(' AND ') : '';
   const { results } = await c.env.DB.prepare(`SELECT * FROM "tags"${whereClause} ORDER BY id ASC`).bind(...params).all();
   const viewRecs = (results || []) as any[];

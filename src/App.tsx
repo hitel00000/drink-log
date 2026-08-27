@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type ChangeEvent, type FormEvent } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type ChangeEvent, type FormEvent } from "react";
 import { DEFAULT_SAKE_TAGS } from "./constants/defaultTags";
 import {
   createCustomSakeTag,
@@ -124,6 +124,7 @@ export default function App() {
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [filterDrinkAgain, setFilterDrinkAgain] = useState<DrinkAgainValue | "all">("all");
   const [searchQuery, setSearchQuery] = useState<string>("");
+  const [lastListRoute, setLastListRoute] = useState<"#/logs" | "#/feed">("#/logs");
   const fileInputId = useId();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -194,12 +195,18 @@ export default function App() {
 
       setRoute(newRoute);
 
+      if (newRoute === "#/feed") {
+        setLastListRoute("#/feed");
+      } else if (newRoute === "#/logs") {
+        setLastListRoute("#/logs");
+      }
+
       // Detail view or Create view -> Always scroll to top
       if (newRoute.startsWith("#/logs/") || newRoute === "#/") {
         window.scrollTo({ top: 0, behavior: "instant" });
-      } else if (newRoute === "#/logs") {
+      } else if (newRoute === "#/logs" || newRoute === "#/feed") {
         // Returning to gallery list -> Restore previous scroll position
-        const savedY = scrollPositions.current["#/logs"];
+        const savedY = scrollPositions.current[newRoute];
         if (typeof savedY === "number") {
           requestAnimationFrame(() => {
             requestAnimationFrame(() => {
@@ -372,7 +379,7 @@ export default function App() {
       await deleteSakeRecord(id, authSession.user?.id ?? "local");
       showToast("기록이 삭제되었습니다.");
       await refreshData();
-      window.location.hash = "#/logs";
+      window.location.hash = lastListRoute;
     } catch {
       alert("기록 삭제에 실패했습니다.");
     }
@@ -380,16 +387,30 @@ export default function App() {
 
   // Route matching
   const isCreateRoute = route === "#/" || route === "";
-  const isListRoute = route === "#/logs";
+  const isFeedRoute = route === "#/feed";
+  const isListRoute = route === "#/logs" || isFeedRoute;
   const isDetailRoute = route.startsWith("#/logs/") && !route.endsWith("/edit");
   const isEditRoute = route.startsWith("#/logs/") && route.endsWith("/edit");
 
+  const currentUserId = authSession.user?.id != null ? String(authSession.user.id) : "local";
+  const isCloudAuth = authSession.authenticated && !isStaticSite;
+
+  const myRecords = useMemo(() => {
+    if (!isCloudAuth) return records;
+    return records.filter((r) => String(r.record.owner_id) === currentUserId);
+  }, [records, isCloudAuth, currentUserId]);
+
+  const feedRecords = records;
+  const activeRecords = isFeedRoute ? feedRecords : myRecords;
+
   // Detail item extraction
   const detailId = isDetailRoute ? route.replace("#/logs/", "") : null;
-  const detailIndex = detailId ? records.findIndex((r) => String(r.id) === detailId) : -1;
-  const detailRecord = detailIndex !== -1 ? records[detailIndex] : null;
-  const prevRecord = detailIndex > 0 ? records[detailIndex - 1] : null;
-  const nextRecord = detailIndex >= 0 && detailIndex < records.length - 1 ? records[detailIndex + 1] : null;
+  const activeListForFlip = lastListRoute === "#/feed" ? feedRecords : myRecords;
+  const detailIndex = detailId ? activeListForFlip.findIndex((r) => String(r.id) === detailId) : -1;
+  const detailRecord = detailId ? records.find((r) => String(r.id) === detailId) || null : null;
+  const prevRecord = detailIndex > 0 ? activeListForFlip[detailIndex - 1] : null;
+  const nextRecord = detailIndex >= 0 && detailIndex < activeListForFlip.length - 1 ? activeListForFlip[detailIndex + 1] : null;
+  const isMyRecord = detailRecord ? String(detailRecord.record.owner_id) === currentUserId || !isCloudAuth : false;
 
   // Edit item setup
   useEffect(() => {
@@ -537,8 +558,17 @@ export default function App() {
           >
             {editingId ? "기록 수정" : "기록 작성"}
           </a>
-          <a href="#/logs" className={`view-tab ${isListRoute || isDetailRoute ? "active" : ""}`}>
-            컬렉션 갤러리 {!isLoadingData && `(${records.length})`}
+          <a
+            href="#/logs"
+            className={`view-tab ${route === "#/logs" || (isDetailRoute && lastListRoute === "#/logs") ? "active" : ""}`}
+          >
+            내 저널 {!isLoadingData && `(${myRecords.length})`}
+          </a>
+          <a
+            href="#/feed"
+            className={`view-tab ${route === "#/feed" || (isDetailRoute && lastListRoute === "#/feed") ? "active" : ""}`}
+          >
+            둘러보기 {!isLoadingData && `(${feedRecords.length})`}
           </a>
         </nav>
       </div>
@@ -1148,6 +1178,31 @@ export default function App() {
 
               {/* Detail Right: Content & Specs */}
               <div className="journal-sheet" style={{ margin: 0 }}>
+                {/* Author Card (Shown if viewing another user's record or in feed mode) */}
+                {(!isMyRecord || isFeedRoute || detailRecord.owner) && detailRecord.owner && (
+                  <div className="detail-author-card">
+                    {detailRecord.owner.avatar_url ? (
+                      <img
+                        src={detailRecord.owner.avatar_url}
+                        className="detail-author-avatar"
+                        alt="Author Avatar"
+                      />
+                    ) : (
+                      <div className="detail-author-fallback">
+                        {detailRecord.owner.display_name?.[0] || "U"}
+                      </div>
+                    )}
+                    <div className="detail-author-info">
+                      <span className="detail-author-name">
+                        {detailRecord.owner.display_name || (isMyRecord ? "나의 기록" : "사케 애호가")}
+                      </span>
+                      <span className="detail-author-desc">
+                        {isMyRecord ? "내가 작성한 테이스팅 노트" : "애주가의 테이스팅 저널"}
+                      </span>
+                    </div>
+                  </div>
+                )}
+
                 <div className="detail-title">{detailRecord.record.name}</div>
                 <div className="detail-meta-line">
                   {[detailRecord.record.region, detailRecord.record.brewery, detailRecord.record.sake_type]
@@ -1315,22 +1370,24 @@ export default function App() {
                   </tbody>
                 </table>
 
-                {/* Actions */}
-                <div className="detail-actions-row">
-                  <a href={`#/logs/${detailRecord.id}/edit`} className="btn-secondary">
-                    수정하기
-                  </a>
-                  <button
-                    type="button"
-                    className="btn-danger"
-                    onClick={() => handleDelete(detailRecord.id)}
-                  >
-                    삭제하기
-                  </button>
-                </div>
+                {/* Actions (Only editable/deletable by owner) */}
+                {isMyRecord && (
+                  <div className="detail-actions-row">
+                    <a href={`#/logs/${detailRecord.id}/edit`} className="btn-secondary">
+                      수정하기
+                    </a>
+                    <button
+                      type="button"
+                      className="btn-danger"
+                      onClick={() => handleDelete(detailRecord.id)}
+                    >
+                      삭제하기
+                    </button>
+                  </div>
+                )}
 
                 {/* Journal Flip Previous / Next Navigation */}
-                {records.length > 1 && (
+                {activeListForFlip.length > 1 && (
                   <div className="journal-flip-nav">
                     {prevRecord ? (
                       <a href={`#/logs/${prevRecord.id}`} className="journal-flip-card prev">
@@ -1344,9 +1401,9 @@ export default function App() {
                       </div>
                     )}
 
-                    <a href="#/logs" className="journal-flip-card list" title="전체 갤러리 목록으로">
+                    <a href={lastListRoute} className="journal-flip-card list" title="목록으로 돌아가기">
                       <span className="flip-badge">목록</span>
-                      <span className="flip-name">전체 갤러리</span>
+                      <span className="flip-name">{lastListRoute === "#/feed" ? "둘러보기" : "내 저널"}</span>
                     </a>
 
                     {nextRecord ? (
@@ -1378,13 +1435,20 @@ export default function App() {
       )}
 
       {/* ====================================================
-           3. COLLECTION LIST / GRID VIEW
+           3. COLLECTION LIST / GRID VIEW (MY JOURNAL & COMMUNITY FEED)
       ==================================================== */}
       {isListRoute && (
         <>
           {/* Quick Search & Verdict Taste Filter Bar */}
-          {!isLoadingData && records.length > 0 && (
+          {!isLoadingData && activeRecords.length > 0 && (
             <div className="gallery-control-header">
+              {isFeedRoute && (
+                <div className="gallery-feed-intro">
+                  <span className="feed-intro-title">모두의 시음 피드</span>
+                  <span className="feed-intro-sub">애주가들이 공유한 사케 테이스팅 노트와 안주 페어링</span>
+                </div>
+              )}
+
               {/* Quick Search Input */}
               <div className="gallery-search-wrap">
                 <span className="search-icon">🔍</span>
@@ -1393,7 +1457,11 @@ export default function App() {
                   className="gallery-search-input"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="사케 이름, 지역, 양조장, 메모, 태그 검색..."
+                  placeholder={
+                    isFeedRoute
+                      ? "사케 이름, 양조장, 작성자, 태그, 장소 검색..."
+                      : "사케 이름, 지역, 양조장, 메모, 태그 검색..."
+                  }
                 />
                 {searchQuery && (
                   <button
@@ -1407,35 +1475,44 @@ export default function App() {
                 )}
               </div>
 
-              {/* Quick Verdict Taste Filter Bar */}
+              {/* Quick Verdict Taste Filter Bar (방안 A: 검증된 사케 큐레이션) */}
               <div className="gallery-filter-bar">
                 <button
                   type="button"
                   className={`gallery-filter-pill ${filterDrinkAgain === "all" ? "active" : ""}`}
                   onClick={() => setFilterDrinkAgain("all")}
                 >
-                  전체 <span className="pill-count">{records.length}</span>
+                  전체 <span className="pill-count">{activeRecords.length}</span>
                 </button>
                 <button
                   type="button"
                   className={`gallery-filter-pill gold ${filterDrinkAgain === "yes" ? "active" : ""}`}
                   onClick={() => setFilterDrinkAgain("yes")}
                 >
-                  ✨ 다시 마신다 <span className="pill-count">{records.filter((r) => r.record.drink_again === "yes").length}</span>
+                  {isFeedRoute ? "✨ 호평 사케" : "✨ 다시 마신다"}{" "}
+                  <span className="pill-count">
+                    {activeRecords.filter((r) => r.record.drink_again === "yes").length}
+                  </span>
                 </button>
                 <button
                   type="button"
                   className={`gallery-filter-pill ${filterDrinkAgain === "unsure" ? "active" : ""}`}
                   onClick={() => setFilterDrinkAgain("unsure")}
                 >
-                  🤔 잘모르겠음 <span className="pill-count">{records.filter((r) => r.record.drink_again === "unsure").length}</span>
+                  {isFeedRoute ? "🤔 호불호/보통" : "🤔 잘모르겠음"}{" "}
+                  <span className="pill-count">
+                    {activeRecords.filter((r) => r.record.drink_again === "unsure").length}
+                  </span>
                 </button>
                 <button
                   type="button"
                   className={`gallery-filter-pill ${filterDrinkAgain === "no" ? "active" : ""}`}
                   onClick={() => setFilterDrinkAgain("no")}
                 >
-                  💧 별로 <span className="pill-count">{records.filter((r) => r.record.drink_again === "no").length}</span>
+                  {isFeedRoute ? "💧 아쉬움" : "💧 별로"}{" "}
+                  <span className="pill-count">
+                    {activeRecords.filter((r) => r.record.drink_again === "no").length}
+                  </span>
                 </button>
               </div>
             </div>
@@ -1457,12 +1534,16 @@ export default function App() {
                 </div>
               ))}
             </div>
-          ) : records.length === 0 ? (
+          ) : activeRecords.length === 0 ? (
             <div className="empty-state-box">
               <div className="empty-state-icon">🍶</div>
-              <div className="empty-state-title">아직 기록된 사케가 없습니다</div>
+              <div className="empty-state-title">
+                {isFeedRoute ? "아직 등록된 사케 피드가 없습니다" : "아직 내가 기록한 사케가 없습니다"}
+              </div>
               <p className="empty-state-desc">
-                오늘 마신 사케의 첫 번째 테이스팅 노트를 남겨보세요.
+                {isFeedRoute
+                  ? "첫 번째 사케 테이스팅 노트를 작성하고 모두와 공유해보세요."
+                  : "오늘 마신 사케의 첫 번째 테이스팅 노트를 남겨보세요."}
               </p>
               <a
                 href="#/"
@@ -1480,13 +1561,14 @@ export default function App() {
           ) : (() => {
             const filteredByVerdict =
               filterDrinkAgain === "all"
-                ? records
-                : records.filter((r) => r.record.drink_again === filterDrinkAgain);
+                ? activeRecords
+                : activeRecords.filter((r) => r.record.drink_again === filterDrinkAgain);
 
             const q = searchQuery.trim().toLowerCase();
             const displayRecords = q
               ? filteredByVerdict.filter((entry) => {
                   const r = entry.record;
+                  const authorName = entry.owner?.display_name || "";
                   const matchString = [
                     r.name,
                     r.region,
@@ -1497,6 +1579,7 @@ export default function App() {
                     r.one_line_note,
                     r.food_pairing,
                     r.companions,
+                    authorName,
                   ]
                     .filter(Boolean)
                     .join(" ")
@@ -1515,7 +1598,9 @@ export default function App() {
                     {searchQuery
                       ? `'${searchQuery}' 검색 결과가 없습니다.`
                       : filterDrinkAgain === "yes"
-                        ? "아직 '다시 마신다'로 기록된 인생 사케가 없습니다."
+                        ? isFeedRoute
+                          ? "아직 호평(다시 마신다)으로 추천된 사케가 없습니다."
+                          : "아직 '다시 마신다'로 기록된 인생 사케가 없습니다."
                         : filterDrinkAgain === "unsure"
                           ? "'잘모르겠음'으로 기록된 사케가 없습니다."
                           : "'별로'로 기록된 사케가 없습니다."}
@@ -1529,7 +1614,7 @@ export default function App() {
                     }}
                     style={{ margin: "0 auto", padding: "8px 24px" }}
                   >
-                    전체 사케 목록 보기
+                    {isFeedRoute ? "전체 피드 보기" : "전체 저널 목록 보기"}
                   </button>
                 </div>
               );
@@ -1542,6 +1627,7 @@ export default function App() {
                     entry.images[0]?.thumbnail_data_url ||
                     entry.images[0]?.data_url ||
                     "";
+                  const isOwn = String(entry.record.owner_id) === currentUserId;
                   return (
                     <a
                       key={entry.id}
@@ -1554,6 +1640,7 @@ export default function App() {
                             src={thumb}
                             className="collection-card-img"
                             alt={entry.record.name}
+                            loading="lazy"
                           />
                         ) : (
                           <div
@@ -1576,33 +1663,77 @@ export default function App() {
                       </div>
                       <div className="collection-card-body">
                         <div>
+                          {/* Author Bar (Feed Mode or shared records) */}
+                          {isFeedRoute && (
+                            <div className="card-author-bar">
+                              {entry.owner?.avatar_url ? (
+                                <img
+                                  src={entry.owner.avatar_url}
+                                  className="card-author-avatar"
+                                  alt=""
+                                />
+                              ) : (
+                                <div className="card-author-fallback">
+                                  {entry.owner?.display_name?.[0] || "U"}
+                                </div>
+                              )}
+                              <span className="card-author-name">
+                                {entry.owner?.display_name || (isOwn ? "나의 기록" : "사케 애호가")}
+                              </span>
+                              <span className="card-author-date">
+                                {entry.record.consumed_date?.slice(0, 10) || ""}
+                              </span>
+                            </div>
+                          )}
+
                           <div className="collection-title">{entry.record.name}</div>
                           <div className="collection-sub">
-                            {[entry.record.region, entry.record.consumed_date]
+                            {[entry.record.region, entry.record.brewery, entry.record.sake_type]
                               .filter(Boolean)
-                              .join(" · ")}
+                              .join(" · ") || "기본 정보 없음"}
                           </div>
                         </div>
-                        <div className="collection-badges">
-                          {entry.record.drink_again === "yes" && (
-                            <span className="mini-pill gold">✨ 다시 마신다</span>
+
+                        {/* Note & Badges */}
+                        <div>
+                          {entry.record.one_line_note && (
+                            <div className="collection-card-note">
+                              “{entry.record.one_line_note}”
+                            </div>
                           )}
-                          {entry.tags.slice(0, 3).map((t) => (
-                            <span key={t.id} className="mini-pill">
-                              {t.label}
-                            </span>
-                          ))}
+
+                          <div className="collection-badges">
+                            {entry.record.drink_again === "yes" && (
+                              <span className="mini-pill gold">✨ 다시 마신다</span>
+                            )}
+                            {entry.record.drink_again === "unsure" && (
+                              <span className="mini-pill">🤔 잘모르겠음</span>
+                            )}
+                            {entry.record.drink_again === "no" && (
+                              <span className="mini-pill">💧 별로</span>
+                            )}
+                            {entry.record.place && (
+                              <span className="mini-pill">📍 {entry.record.place}</span>
+                            )}
+                            {entry.tags.slice(0, 3).map((t) => (
+                              <span key={t.id} className="mini-pill">
+                                #{t.label.replace(/^(맛|향|느낌):\s*/, "")}
+                              </span>
+                            ))}
+                          </div>
                         </div>
                       </div>
                     </a>
                   );
                 })}
 
-                {/* Ghost Slot for Adding Next Sake Record */}
-                <a href="#/" className="collection-card-add">
-                  <div className="collection-card-add-icon">+</div>
-                  <div className="collection-card-add-text">새로운 사케 기록하기</div>
-                </a>
+                {/* Ghost Slot for Adding Next Sake Record (Only on My Journal tab) */}
+                {!isFeedRoute && (
+                  <a href="#/" className="collection-card-add">
+                    <div className="collection-card-add-icon">+</div>
+                    <div className="collection-card-add-text">새로운 사케 기록하기</div>
+                  </a>
+                )}
               </div>
             );
           })()}

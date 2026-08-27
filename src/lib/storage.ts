@@ -522,9 +522,9 @@ function buildSakeRecordEntry(
   recordTags: SakeRecordTag[],
   tags: SakeTag[],
 ): SakeRecordEntry {
-  const tagsById = new Map(tags.map((tag) => [tag.id, tag]));
+  const tagsById = new Map(tags.map((tag) => [String(tag.id), tag]));
   const selectedTags = recordTags
-    .map((recordTag) => tagsById.get(recordTag.tag_id))
+    .map((recordTag) => tagsById.get(String(recordTag.tag_id)))
     .filter((tag): tag is SakeTag => Boolean(tag));
 
   const normalizedImages = images.map((img) => ({
@@ -552,6 +552,7 @@ function buildSakeRecordEntry(
   return {
     id: record.id,
     record,
+    owner: record.owner ?? null,
     images: [...normalizedImages].sort((left, right) => left.display_order - right.display_order),
     tags: sortSakeTags(selectedTags),
     record_tags: recordTags,
@@ -562,10 +563,10 @@ export async function loadSakeRecords(
   ownerId: number | string = LOCAL_OWNER_ID,
 ): Promise<SakeRecordEntry[]> {
   if (cloudStorageEnabled) {
-    // Mold Native Eager Loading (?include=images,record_tags) + Tags (2 HTTP requests)
+    // Mold Native Eager Loading (?include=images,record_tags,owner) + Tags (2 HTTP requests)
     const [recordsWithIncludes, tags] = await Promise.all([
-      fetchAllPages<SakeRecord & { images?: SakeImage[]; record_tags?: SakeRecordTag[] }>(
-        `${CLOUD_SAKE_RECORDS_PATH}?include=images,record_tags`,
+      fetchAllPages<SakeRecord & { images?: SakeImage[]; record_tags?: SakeRecordTag[]; owner?: import("../types/sake").UserOwnerProfile }>(
+        `${CLOUD_SAKE_RECORDS_PATH}?include=images,record_tags,owner`,
       ),
       loadSakeTags(ownerId),
     ]);
@@ -649,8 +650,8 @@ export async function getSakeRecordById(
     try {
       // 1. Primary: Mold Native single item fetch with eager loading
       const [recordWithIncludes, tags] = await Promise.all([
-        cloudFetchData<SakeRecord & { images?: SakeImage[]; record_tags?: SakeRecordTag[] }>(
-          `${CLOUD_SAKE_RECORDS_PATH}/${id}?include=images,record_tags`,
+        cloudFetchData<SakeRecord & { images?: SakeImage[]; record_tags?: SakeRecordTag[]; owner?: import("../types/sake").UserOwnerProfile }>(
+          `${CLOUD_SAKE_RECORDS_PATH}/${id}?include=images,record_tags,owner`,
         ),
         loadSakeTags(ownerId),
       ]);

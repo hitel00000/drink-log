@@ -17,10 +17,18 @@ export interface MoldResponse<T> {
   };
 }
 
+export interface UserOwnerProfile {
+  id: number | string;
+  display_name?: string | null;
+  avatar_url?: string | null;
+  email?: string | null;
+}
+
 export interface SakeRecord {
   id: number | string;
   legacy_id?: string | null;
   owner_id: number | string;
+  owner?: UserOwnerProfile | null;
   drink_type: DrinkType;
   name: string;
   region: string | null;
@@ -83,6 +91,7 @@ export interface SakeRecordTag {
 export interface SakeRecordEntry {
   id: number | string;
   record: SakeRecord;
+  owner?: UserOwnerProfile | null;
   images: SakeImage[];
   tags: SakeTag[];
   record_tags: SakeRecordTag[];
